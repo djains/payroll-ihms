@@ -1,0 +1,102 @@
+import { StyleSheet } from 'react-native';
+import { colors } from '../../theme/colors';
+import { spacing, shadows } from '../../theme/spacing';
+import { fontSizes } from '../../theme/typography';
+import { ms } from '../../theme/responsive';
+
+export const styles = StyleSheet.create({
+  container: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: ms(10),
+    minHeight: ms(56),
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  leftSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  backButton: {
+    width: ms(38),
+    height: ms(38),
+    borderRadius: ms(19),
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginRight: ms(12),
+    ...shadows.sm,
+  },
+  titleContainer: {
+    flex: 1,
+    marginRight: ms(8),
+  },
+  title: {
+    fontSize: fontSizes.md + 1,
+    color: '#0F172A',
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  subtitle: {
+    fontSize: fontSizes.xxs + 1,
+    color: '#64748B',
+    fontWeight: '600',
+    marginTop: ms(1),
+  },
+  rightSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
+  actionButton: {
+    width: ms(38),
+    height: ms(38),
+    borderRadius: ms(19),
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginLeft: ms(8),
+    ...shadows.sm,
+  },
+  bellButton: {
+    width: ms(38),
+    height: ms(38),
+    borderRadius: ms(19),
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    position: 'relative',
+    marginLeft: ms(8),
+  },
+  bellBadge: {
+    position: 'absolute',
+    top: -ms(2),
+    right: -ms(2),
+    minWidth: ms(16),
+    height: ms(16),
+    borderRadius: ms(8),
+    backgroundColor: '#EF4444',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: ms(2),
+  },
+  bellBadgeText: {
+    color: '#FFFFFF',
+    fontSize: ms(9),
+    fontWeight: '800',
+    lineHeight: ms(11),
+  },
+});

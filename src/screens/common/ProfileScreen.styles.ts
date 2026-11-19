@@ -1,0 +1,306 @@
+import { StyleSheet, Platform } from 'react-native';
+import { colors } from '../../theme/colors';
+import { spacing, borderRadius, shadows } from '../../theme/spacing';
+import { typography, fontSizes } from '../../theme/typography';
+import { ms } from '../../theme/responsive';
+
+export const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: ms(100),
+    backgroundColor: '#F8FAFC',
+  },
+
+  // ── Custom Flush Edge-to-Edge Top Header Bar (Matching Attendance Punch Header) ──
+  customHeader: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: spacing.md,
+    paddingTop: Platform.OS === 'ios' ? ms(10) : ms(14),
+    paddingBottom: ms(14),
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+    marginBottom: spacing.md,
+    ...shadows.sm,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(12),
+    flex: 1,
+  },
+  headerBackButton: {
+    width: ms(36),
+    height: ms(36),
+    borderRadius: ms(18),
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitleWrap: {
+    flex: 1,
+  },
+  headerTitleText: {
+    fontSize: fontSizes.md + 1,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: -0.3,
+  },
+  headerLogoutBtn: {
+    width: ms(36),
+    height: ms(36),
+    borderRadius: ms(18),
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // HERO PROFILE CARD
+  heroCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.xl,
+    padding: spacing.md,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    ...shadows.sm,
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: spacing.xs,
+  },
+  avatarBadge: {
+    width: ms(70),
+    height: ms(70),
+    borderRadius: ms(35),
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.md,
+  },
+  avatarText: {
+    fontSize: fontSizes.xl,
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  activeStatusPill: {
+    position: 'absolute',
+    bottom: ms(2),
+    right: ms(2),
+    width: ms(16),
+    height: ms(16),
+    borderRadius: ms(8),
+    backgroundColor: '#10B981',
+    borderWidth: 2.5,
+    borderColor: '#FFFFFF',
+  },
+  profileName: {
+    fontSize: fontSizes.md + 1,
+    color: '#0F172A',
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  profileDesignation: {
+    fontSize: fontSizes.xs,
+    color: '#64748B',
+    fontWeight: '600',
+    marginTop: ms(2),
+    textAlign: 'center',
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(8),
+    marginTop: spacing.sm,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: ms(10),
+    paddingVertical: ms(4),
+    borderRadius: borderRadius.full,
+    gap: ms(4),
+  },
+  verifiedBadgeText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  companyTag: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: ms(10),
+    paddingVertical: ms(4),
+    borderRadius: borderRadius.full,
+  },
+  companyTagText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '700',
+    color: '#475569',
+  },
+
+  // ACCORDION DROPDOWN CARD
+  accordionCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.lg,
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    overflow: 'hidden',
+    ...shadows.sm,
+  },
+  accordionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingVertical: ms(13),
+    backgroundColor: '#FFFFFF',
+  },
+  accordionTitleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: ms(10),
+  },
+  iconBox: {
+    width: ms(32),
+    height: ms(32),
+    borderRadius: ms(8),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  accordionTitleCol: {
+    flex: 1,
+  },
+  accordionTitle: {
+    fontSize: fontSizes.xs + 1,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: -0.2,
+  },
+  accordionSummary: {
+    fontSize: fontSizes.xxs,
+    color: '#64748B',
+    fontWeight: '500',
+    marginTop: ms(1),
+  },
+  chevronBox: {
+    width: ms(28),
+    height: ms(28),
+    borderRadius: ms(14),
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: ms(6),
+  },
+
+  // ACCORDION EXPANDED BODY
+  accordionBody: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    backgroundColor: '#FAFCFE',
+  },
+
+  // KEY-VALUE ROWS
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: ms(8),
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  infoLabel: {
+    fontSize: fontSizes.xs,
+    color: '#64748B',
+    fontWeight: '500',
+    flex: 1,
+  },
+  infoValue: {
+    fontSize: fontSizes.xs,
+    color: '#0F172A',
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  infoValueHighlight: {
+    fontSize: fontSizes.xs,
+    color: '#0F766E',
+    fontWeight: '800',
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Courier',
+    textAlign: 'right',
+  },
+  statusChipActive: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(5),
+    backgroundColor: '#DCFCE7',
+    paddingHorizontal: ms(8),
+    paddingVertical: ms(3),
+    borderRadius: borderRadius.full,
+  },
+  statusDotActive: {
+    width: ms(6),
+    height: ms(6),
+    borderRadius: ms(3),
+    backgroundColor: '#15803D',
+  },
+  statusChipActiveText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '700',
+    color: '#15803D',
+  },
+  bloodGroupBadge: {
+    backgroundColor: '#FEE2E2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    paddingHorizontal: ms(8),
+    paddingVertical: ms(2),
+    borderRadius: borderRadius.sm,
+  },
+  bloodGroupText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+
+  // PAYROLL HIGHLIGHT BOX
+  payrollGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  payrollBox: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  payrollLabel: {
+    fontSize: fontSizes.xxs,
+    color: '#64748B',
+    fontWeight: '600',
+    marginBottom: ms(2),
+  },
+  payrollAmount: {
+    fontSize: fontSizes.md,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+});

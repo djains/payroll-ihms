@@ -1,0 +1,186 @@
+import { StyleSheet, Dimensions } from 'react-native';
+import { spacing, borderRadius, shadows, fontSizes, ms } from '../../../theme';
+
+export const styles = StyleSheet.create({
+  container: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs,
+  },
+  headerBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(10),
+    flex: 1,
+  },
+  backButton: {
+    width: ms(36),
+    height: ms(36),
+    borderRadius: ms(18),
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: fontSizes.md + 1,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  headerSubtitle: {
+    fontSize: fontSizes.xxs,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  searchBoxWrap: {
+    marginBottom: spacing.sm,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: ms(12),
+    paddingVertical: ms(8),
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    marginBottom: spacing.sm,
+  },
+  statsText: {
+    fontSize: fontSizes.xs,
+    color: '#475569',
+    fontWeight: '700',
+  },
+  userCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius.lg,
+    padding: ms(12),
+    marginBottom: ms(10),
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    ...shadows.sm,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: ms(6),
+  },
+  userInfoLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(10),
+    flex: 1,
+  },
+  userAvatar: {
+    width: ms(38),
+    height: ms(38),
+    borderRadius: ms(19),
+    backgroundColor: '#0F766E',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userAvatarText: {
+    color: '#FFFFFF',
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+  },
+  usernameText: {
+    fontSize: fontSizes.sm,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  loginNameText: {
+    fontSize: fontSizes.xxs,
+    color: '#64748B',
+    fontWeight: '500',
+    marginTop: ms(1),
+  },
+  statusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(4),
+    paddingHorizontal: ms(8),
+    paddingVertical: ms(3),
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+  },
+  statusBadgeActive: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  statusBadgeInactive: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  statusTextActive: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '800',
+    color: '#059669',
+  },
+  statusTextInactive: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '800',
+    color: '#DC2626',
+  },
+  cardBottomRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    paddingTop: ms(8),
+    marginTop: ms(4),
+  },
+  rolePill: {
+    backgroundColor: '#F0FDFA',
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+    paddingHorizontal: ms(8),
+    paddingVertical: ms(2),
+    borderRadius: borderRadius.sm,
+  },
+  rolePillText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '700',
+    color: '#0D9488',
+  },
+  toggleButton: {
+    paddingHorizontal: ms(10),
+    paddingVertical: ms(4),
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+  },
+  toggleBtnDeactivate: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  toggleBtnActivate: {
+    backgroundColor: '#ECFDF5',
+    borderColor: '#A7F3D0',
+  },
+  toggleBtnText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '800',
+  },
+  emptyWrap: {
+    paddingVertical: ms(40),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    fontSize: fontSizes.sm,
+    color: '#64748B',
+    fontWeight: '600',
+    marginTop: ms(8),
+  },
+});
+

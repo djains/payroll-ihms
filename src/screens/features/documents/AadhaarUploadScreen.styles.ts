@@ -1,0 +1,136 @@
+import { StyleSheet } from 'react-native';
+import { colors } from '../../../theme/colors';
+import { spacing, borderRadius, shadows } from '../../../theme/spacing';
+import { typography, fontSizes } from '../../../theme/typography';
+import { ms } from '../../../theme/responsive';
+
+export const styles = StyleSheet.create({
+  container: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingBottom: ms(80),
+    backgroundColor: colors.background,
+  },
+  card: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: ms(1),
+    borderColor: colors.borderLight,
+    ...shadows.sm,
+  },
+  qrScanBox: {
+    backgroundColor: colors.surfaceVariant,
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: ms(1.5),
+    borderColor: colors.border,
+    borderStyle: 'dashed',
+    marginBottom: spacing.md,
+  },
+  qrTitle: {
+    ...typography.subtitle2,
+    color: colors.textPrimary,
+    fontWeight: '700',
+    marginTop: spacing.xs,
+  },
+  qrSubtitle: {
+    ...typography.caption,
+    fontSize: fontSizes.xxs,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginTop: ms(2),
+  },
+  photoRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginVertical: spacing.sm,
+  },
+  photoCard: {
+    flex: 1,
+    height: ms(90),
+    backgroundColor: colors.surfaceVariant,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: ms(1),
+    borderColor: colors.border,
+  },
+  photoCardText: {
+    ...typography.caption,
+    fontSize: fontSizes.xxs,
+    fontWeight: '600',
+    color: colors.textSecondary,
+    marginTop: ms(4),
+  },
+  extractedBox: {
+    backgroundColor: colors.successLight,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginVertical: spacing.sm,
+  },
+  extractedTitle: {
+    ...typography.subtitle2,
+    color: colors.success,
+    fontWeight: '700',
+    fontSize: fontSizes.xs,
+    marginBottom: spacing.xs,
+  },
+  extractedLine: {
+    ...typography.caption,
+    fontSize: fontSizes.xs,
+    color: colors.textPrimary,
+    marginTop: ms(2),
+  },
+  submitBtn: {
+    marginTop: spacing.md,
+  },
+  imagePreviewContainer: {
+    marginVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    overflow: 'hidden',
+    position: 'relative',
+    height: ms(160),
+    backgroundColor: colors.surfaceVariant,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  cardPreview: {
+    width: '100%',
+    height: '100%',
+  },
+  imageActionOverlay: {
+    position: 'absolute',
+    bottom: spacing.xs,
+    right: spacing.xs,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  changeImageBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: ms(5),
+    borderRadius: borderRadius.full,
+    gap: ms(4),
+  },
+  changeImageText: {
+    color: '#FFFFFF',
+    fontSize: fontSizes.xxs,
+    fontWeight: '700',
+  },
+  removeImageBtn: {
+    backgroundColor: 'rgba(239, 68, 68, 0.85)',
+    width: ms(28),
+    height: ms(28),
+    borderRadius: ms(14),
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
