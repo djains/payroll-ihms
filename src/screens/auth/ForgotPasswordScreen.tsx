@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
+import { View, Text, TouchableOpacity, Linking } from 'react-native';
 import { styles } from './ForgotPasswordScreen.styles';
 import {
   AppScreenContainer,
@@ -7,54 +7,122 @@ import {
   AppButton,
   AppIcon,
 } from '../../components/common';
-import { useAuthStore } from '../../store/authStore';
+import { showToast } from '../../store/toastStore';
+import { authApi } from '../../api';
 import { useNavigation } from '../../navigation/navigationContext';
 import { useResponsive } from '../../theme/responsive';
-import { forgotPasswordSchema } from '../../utils/validation';
 
 export const ForgotPasswordScreen: React.FC = () => {
   const [empCode, setEmpCode] = useState('');
   const [dob, setDob] = useState('');
   const [aadhaar, setAadhaar] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const { resetPassword, isLoading } = useAuthStore();
+  // Verified record state
+  const [verifiedRecord, setVerifiedRecord] = useState<{
+    name: string;
+    empCode: string;
+  } | null>(null);
+
   const { navigate, goBack } = useNavigation();
   const { maxContentWidth, isTablet } = useResponsive();
 
-  const handleReset = async () => {
+  const handleVerify = async () => {
     setFieldErrors({});
 
-    const validation = forgotPasswordSchema.safeParse({
-      empCode,
-      dob,
-      aadhaar,
-      newPassword,
-      confirmPassword,
-    });
+    const cleanCode = empCode.trim().toUpperCase();
+    const cleanDob = dob.trim();
+    const cleanAadhaar = aadhaar.trim().replace(/\s+/g, '');
 
-    if (!validation.success) {
-      const errors: Record<string, string> = {};
-      for (const issue of validation.error.issues) {
-        const field = issue.path[0] as string;
-        if (!errors[field]) {
-          errors[field] = issue.message;
-        }
-      }
+    const errors: Record<string, string> = {};
+    if (!cleanCode) {
+      errors.empCode = 'Employee Code is required';
+    }
+    if (!cleanDob) {
+      errors.dob = 'Date of birth is required';
+    } else if (!/^\d{2}\/\d{2}\/\d{4}$/.test(cleanDob) && !/^\d{4}-\d{2}-\d{2}$/.test(cleanDob)) {
+      errors.dob = 'Use format DD/MM/YYYY (e.g. 15/08/1995)';
+    }
+    if (!cleanAadhaar) {
+      errors.aadhaar = 'Aadhaar Number is required';
+    } else if (cleanAadhaar.length < 12) {
+      errors.aadhaar = 'Aadhaar must be at least 12 digits';
+    }
+
+    if (Object.keys(errors).length > 0) {
       setFieldErrors(errors);
       return;
     }
 
-    const success = await resetPassword(empCode, dob, aadhaar, newPassword);
-    if (success) {
-      navigate('Login');
+    setIsLoading(true);
+    try {
+      const res = await authApi.verifyForgetPassword(cleanCode, cleanDob, cleanAadhaar);
+      setIsLoading(false);
+
+      if (res.success && res.data && Array.isArray(res.data) && res.data.length > 0) {
+        const item = res.data[0];
+        setVerifiedRecord({
+          name: item.emp_name || 'Staff Member',
+          empCode: cleanCode,
+        });
+        showToast({
+          type: 'success',
+          title: 'Identity Verified',
+          message: `Official record found for ${item.emp_name || cleanCode}.`,
+        });
+      } else {
+        showToast({
+          type: 'error',
+          title: 'Verification Failed',
+          message: 'Details could not be matched with enterprise records. Please verify Employee Code, DOB, and Aadhaar.',
+        });
+        setFieldErrors({
+          empCode: 'Details could not be matched with enterprise database records',
+        });
+      }
+    } catch (err: any) {
+      setIsLoading(false);
+      showToast({
+        type: 'error',
+        title: 'Connection Error',
+        message: err?.message || 'Unable to reach backend verification service.',
+      });
     }
   };
 
+  const handleSendWhatsApp = () => {
+    if (!verifiedRecord) return;
+    const msg =
+      `Hello HR Administrator / Supervisor,\n\n` +
+      `My identity has been verified on the NG GLOBAL Workforce App:\n` +
+      `• Employee ID: ${verifiedRecord.empCode}\n` +
+      `• Name: ${verifiedRecord.name}\n\n` +
+      `Please reset my login password in User Management.\n\nThank you.`;
+
+    const url = `https://wa.me/?text=${encodeURIComponent(msg)}`;
+    Linking.openURL(url).catch(() => {
+      showToast({
+        type: 'warning',
+        title: 'Could Not Open WhatsApp',
+        message: 'Please contact HR directly or share your Employee ID.',
+      });
+    });
+  };
+
+  const handleCallHelpdesk = () => {
+    // Official Helpdesk / Enterprise Support
+    Linking.openURL('tel:1800120000').catch(() => {
+      showToast({
+        type: 'info',
+        title: 'Helpdesk Phone',
+        message: 'Please contact your supervisor or company branch office.',
+      });
+    });
+  };
+
   return (
-    <AppScreenContainer scrollable={false} contentContainerStyle={styles.container} backgroundColor="#FAF8F2">
+    <AppScreenContainer scrollable={true} contentContainerStyle={styles.container} backgroundColor="#FAF8F2">
       <View style={[styles.responsiveWrapper, isTablet && { maxWidth: maxContentWidth }]}>
         
         {/* Compact Branding Header */}
@@ -62,111 +130,153 @@ export const ForgotPasswordScreen: React.FC = () => {
           <View style={styles.logoBadge}>
             <AppIcon name="lock" size={20} color="#111827" />
           </View>
-          <Text style={styles.heroTitle}>Reset Password</Text>
-          <Text style={styles.heroSubtitle}>3-POINT IDENTITY VERIFICATION</Text>
+          <Text style={styles.heroTitle}>Forgot Password</Text>
+          <Text style={styles.heroSubtitle}>
+            {verifiedRecord ? 'IDENTITY VERIFIED • HR HELPDESK' : '3-POINT IDENTITY VERIFICATION'}
+          </Text>
         </View>
 
         {/* Card Centered In Identical Style */}
         <View style={styles.card}>
-          <AppTextInput
-            label="Employee Code"
-            placeholder="e.g. 77777006, I8578"
-            value={empCode}
-            onChangeText={(val) => {
-              setEmpCode(val);
-              if (fieldErrors.empCode) {
-                setFieldErrors((prev) => ({ ...prev, empCode: '' }));
-              }
-            }}
-            iconLeft="person"
-            autoCapitalize="characters"
-            error={fieldErrors.empCode}
-            containerStyle={styles.inputItem}
-          />
+          {verifiedRecord ? (
+            /* VERIFIED SUCCESS & HR RESET REQUEST VIEW */
+            <View style={{ alignItems: 'center', width: '100%' }}>
+              <View style={styles.verifiedBadge}>
+                <AppIcon name="checkmark" size={26} color="#16A34A" />
+              </View>
 
-          <AppTextInput
-            label="Date of Birth"
-            placeholder="DD/MM/YYYY"
-            value={dob}
-            onChangeText={(val) => {
-              setDob(val);
-              if (fieldErrors.dob) {
-                setFieldErrors((prev) => ({ ...prev, dob: '' }));
-              }
-            }}
-            iconLeft="calendar"
-            keyboardType="numbers-and-punctuation"
-            error={fieldErrors.dob}
-            containerStyle={styles.inputItem}
-          />
+              <Text style={styles.verifiedTitle}>Identity Confirmed!</Text>
+              <Text style={styles.verifiedSub}>
+                Your employee details matched official records in MySQL database.
+              </Text>
 
-          <AppTextInput
-            label="Aadhaar Card Number"
-            placeholder="12-digit Aadhaar number"
-            value={aadhaar}
-            onChangeText={(val) => {
-              setAadhaar(val);
-              if (fieldErrors.aadhaar) {
-                setFieldErrors((prev) => ({ ...prev, aadhaar: '' }));
-              }
-            }}
-            iconLeft="shield"
-            keyboardType="number-pad"
-            maxLength={12}
-            error={fieldErrors.aadhaar}
-            containerStyle={styles.inputItem}
-          />
+              {/* Employee Summary Box */}
+              <View style={styles.verifiedDetailsBox}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Employee ID</Text>
+                  <Text style={styles.detailValue}>{verifiedRecord.empCode}</Text>
+                </View>
+                <View style={[styles.detailRow, { borderTopWidth: 1, borderTopColor: '#F1F5F9', marginTop: 4, paddingTop: 4 }]}>
+                  <Text style={styles.detailLabel}>Employee Name</Text>
+                  <Text style={styles.detailValue}>{verifiedRecord.name}</Text>
+                </View>
+                <View style={[styles.detailRow, { borderTopWidth: 1, borderTopColor: '#F1F5F9', marginTop: 4, paddingTop: 4 }]}>
+                  <Text style={styles.detailLabel}>Verification Status</Text>
+                  <Text style={[styles.detailValue, { color: '#16A34A' }]}>● Verified</Text>
+                </View>
+              </View>
 
-          <AppTextInput
-            label="New Password"
-            placeholder="Min. 6 characters"
-            value={newPassword}
-            onChangeText={(val) => {
-              setNewPassword(val);
-              if (fieldErrors.newPassword) {
-                setFieldErrors((prev) => ({ ...prev, newPassword: '' }));
-              }
-            }}
-            iconLeft="lock"
-            isPassword
-            error={fieldErrors.newPassword}
-            containerStyle={styles.inputItem}
-          />
+              <View style={styles.instructionsBox}>
+                <Text style={styles.instructionsText}>
+                  As per enterprise data security, password updates are performed via HR Administrator / Supervisor. Tap below to send your pre-verified reset request.
+                </Text>
+              </View>
 
-          <AppTextInput
-            label="Confirm Password"
-            placeholder="Re-enter new password"
-            value={confirmPassword}
-            onChangeText={(val) => {
-              setConfirmPassword(val);
-              if (fieldErrors.confirmPassword) {
-                setFieldErrors((prev) => ({ ...prev, confirmPassword: '' }));
-              }
-            }}
-            iconLeft="lock"
-            isPassword
-            error={fieldErrors.confirmPassword}
-            containerStyle={styles.inputItem}
-          />
+              {/* Action 1: WhatsApp Direct Request */}
+              <TouchableOpacity
+                style={styles.whatsappButton}
+                onPress={handleSendWhatsApp}
+                activeOpacity={0.8}
+              >
+                <AppIcon name="chatbubble" size={18} color="#FFFFFF" />
+                <Text style={styles.whatsappButtonText}>Send Reset Request via WhatsApp</Text>
+              </TouchableOpacity>
 
-          <AppButton
-            title="Verify & Reset Password"
-            onPress={handleReset}
-            loading={isLoading}
-            style={styles.submitButton}
-          />
+              {/* Action 2: Call Helpdesk */}
+              <TouchableOpacity
+                style={styles.callButton}
+                onPress={handleCallHelpdesk}
+                activeOpacity={0.8}
+              >
+                <AppIcon name="call" size={16} color="#334155" />
+                <Text style={styles.callButtonText}>Call Company Helpdesk</Text>
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={goBack}
-            style={styles.cancelButton}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.cancelButtonText}>Back to Sign In</Text>
-          </TouchableOpacity>
+              {/* Action 3: Back to Login */}
+              <AppButton
+                title="Back to Sign In"
+                onPress={() => navigate('Login')}
+                style={styles.submitButton}
+              />
+            </View>
+          ) : (
+            /* INITIAL FORM: 3-POINT IDENTITY VERIFICATION */
+            <>
+              <View style={styles.instructionsBox}>
+                <Text style={styles.instructionsText}>
+                  Enter your Employee ID, Date of Birth, and 12-digit Aadhaar Number to verify your identity with backend records.
+                </Text>
+              </View>
+
+              <AppTextInput
+                label="Employee Code"
+                placeholder="e.g. Y00002, 77777006"
+                value={empCode}
+                onChangeText={(val) => {
+                  setEmpCode(val);
+                  if (fieldErrors.empCode) {
+                    setFieldErrors((prev) => ({ ...prev, empCode: '' }));
+                  }
+                }}
+                iconLeft="person"
+                autoCapitalize="characters"
+                error={fieldErrors.empCode}
+                containerStyle={styles.inputItem}
+              />
+
+              <AppTextInput
+                label="Date of Birth"
+                placeholder="DD/MM/YYYY (e.g. 15/08/1995)"
+                value={dob}
+                onChangeText={(val) => {
+                  setDob(val);
+                  if (fieldErrors.dob) {
+                    setFieldErrors((prev) => ({ ...prev, dob: '' }));
+                  }
+                }}
+                iconLeft="calendar"
+                keyboardType="numbers-and-punctuation"
+                error={fieldErrors.dob}
+                containerStyle={styles.inputItem}
+              />
+
+              <AppTextInput
+                label="Aadhaar Card Number"
+                placeholder="12-digit Aadhaar number"
+                value={aadhaar}
+                onChangeText={(val) => {
+                  setAadhaar(val);
+                  if (fieldErrors.aadhaar) {
+                    setFieldErrors((prev) => ({ ...prev, aadhaar: '' }));
+                  }
+                }}
+                iconLeft="shield"
+                keyboardType="number-pad"
+                maxLength={14}
+                error={fieldErrors.aadhaar}
+                containerStyle={styles.inputItem}
+              />
+
+              <AppButton
+                title="Verify Identity & Request Reset"
+                onPress={handleVerify}
+                loading={isLoading}
+                style={styles.submitButton}
+              />
+
+              <TouchableOpacity
+                onPress={goBack}
+                style={styles.cancelButton}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.cancelButtonText}>Back to Sign In</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         <Text style={styles.footerNote}>
-          IH&MS-Payroll v2.0 • Secured with Hardware Device Binding
+          NG GLOBAL v2.0 • Secured with Hardware Device Binding
         </Text>
       </View>
     </AppScreenContainer>

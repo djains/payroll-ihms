@@ -154,6 +154,29 @@ export const styles = StyleSheet.create({
     marginTop: ms(4),
     textAlign: 'center',
   },
+  optionalBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: ms(8),
+    paddingVertical: ms(2),
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  optionalBadgeText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  removePhotoBtn: {
+    marginTop: ms(6),
+    paddingHorizontal: ms(8),
+    paddingVertical: ms(2),
+  },
+  removePhotoBtnText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '600',
+    color: '#EF4444',
+  },
   empCodeBadge: {
     alignSelf: 'flex-start',
     flexDirection: 'row',

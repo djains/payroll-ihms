@@ -70,7 +70,7 @@ export const LoginScreen: React.FC = () => {
             </View>
           </View>
 
-          <Text style={styles.heroTitle}>IH&MS-Payroll</Text>
+          <Text style={styles.heroTitle}>NG GLOBAL</Text>
           <Text style={styles.heroSubtitle}>
             INTEGRATED WORKFORCE PLATFORM
           </Text>
@@ -112,6 +112,18 @@ export const LoginScreen: React.FC = () => {
             containerStyle={styles.inputItem}
           />
 
+          {/* Forgot Password Link */}
+          <TouchableOpacity
+            style={styles.forgotLink}
+            onPress={() => navigate('ForgotPassword')}
+            accessibilityRole="button"
+            accessibilityLabel="Forgot Password"
+            activeOpacity={0.7}
+          >
+            <Text style={styles.forgotLinkText}>Forgot Password?</Text>
+            <AppIcon name="chevronRight" size={13} color="#6B7280" />
+          </TouchableOpacity>
+
           {/* Primary Action Button */}
           <AppButton
             title="Sign In"
@@ -119,10 +131,34 @@ export const LoginScreen: React.FC = () => {
             loading={isLoading}
             style={styles.signInButton}
           />
+
+          {/* Terms Agreement Note */}
+          <View style={styles.termsRow}>
+            <Text style={styles.termsNote}>By signing in, you agree to our </Text>
+            <TouchableOpacity
+              onPress={() => navigate('TermsAndConditions')}
+              activeOpacity={0.7}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+            >
+              <Text style={styles.termsLink}>Terms & Conditions</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
+        {/* Direct Legal & Privacy Policy Modal Link */}
+        <TouchableOpacity
+          style={styles.legalBadge}
+          onPress={() => navigate('TermsAndConditions')}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Open Terms and Conditions and Privacy Policy"
+        >
+          <AppIcon name="document" size={14} color="#4B5563" />
+          <Text style={styles.legalBadgeText}>Terms & Conditions • Privacy Policy</Text>
+        </TouchableOpacity>
+
         <Text style={styles.footerNote}>
-          IH&MS-Payroll v2.0 • Secured with Hardware Device Binding
+          NG GLOBAL v2.0 • Secured with Hardware Device Binding
         </Text>
       </View>
     </AppScreenContainer>

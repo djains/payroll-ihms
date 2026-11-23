@@ -734,14 +734,14 @@ Please find below the summary of your official Salary Slip for ${mName} ${slipYe
 • Net Payable Amount: ${net}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-You can also view and download your full printable PDF salary slip anytime by logging into the IHMS Mobile App:
+You can also view and download your full printable PDF salary slip anytime by logging into the NG GLOBAL Mobile App:
 🔗 Portal: https://ihms.app
 
-For any payroll queries, please reach out to the IHMS Accounts & HR Department.
+For any payroll queries, please reach out to the NG GLOBAL Accounts & HR Department.
 
 Best regards,
 Payroll & Accounts Team
-IHMS Integrated Solutions`;
+NG GLOBAL Integrated Solutions`;
 
     const emailTo = slipRecipientEmail.trim();
     const mailtoUrl = `mailto:${encodeURIComponent(emailTo)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
@@ -770,10 +770,10 @@ IHMS Integrated Solutions`;
 
   const buildCredentialMessage = (worker: WorkerItem, pass: string) => {
     return {
-      subject: `IHMS Portal - Login Credentials for ${worker.emp_name} (${worker.emp_code})`,
+      subject: `NG GLOBAL Portal - Login Credentials for ${worker.emp_name} (${worker.emp_code})`,
       body: `Hello ${worker.emp_name},
 
-Welcome to the team! Below are your official IHMS mobile app login credentials:
+Welcome to the team! Below are your official NG GLOBAL mobile app login credentials:
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 • Portal / App Link: https://ihms.app
@@ -783,11 +783,11 @@ Welcome to the team! Below are your official IHMS mobile app login credentials:
 • Assigned Site: ${worker.unit_code || 'Site Unit'}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Please download the IHMS app and sign in with the Login ID and Password provided above.
+Please download the NG GLOBAL app and sign in with the Login ID and Password provided above.
 If you have any questions or need assistance, please contact your unit supervisor.
 
 Best regards,
-IHMS Administration`,
+NG GLOBAL Administration`,
     };
   };
 

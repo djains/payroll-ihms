@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import { API_ENDPOINTS } from './config';
+import { API_ENDPOINTS, ANDROID_API_KEY } from './config';
 
 export interface BackendUserRole {
   id: number;
@@ -84,6 +84,51 @@ export const authApi = {
       token,
       new_password: newPassword,
     });
+  },
+
+  /**
+   * Change Password for logged-in user in MySQL & Django -> POST /api/auth/me/change-password/
+   */
+  async changePassword(oldPassword: string, newPassword: string) {
+    return apiClient.post('/api/auth/me/change-password/', {
+      old_password: oldPassword,
+      new_password: newPassword,
+    });
+  },
+
+  /**
+   * Verify Employee Identity via live 3-point check (Emp Code + DOB + Aadhaar) -> GET /api/mobile/ForgetPassword/
+   */
+  async verifyForgetPassword(empCode: string, dob: string, aadhaar: string) {
+    const cleanCode = empCode.trim().toUpperCase();
+    const cleanDob = dob.trim();
+    const cleanAadhaar = aadhaar.trim();
+
+    return apiClient.get<Array<{ emp_name: string; new_password?: string }>>(
+      `/api/mobile/ForgetPassword/?emp_code=${encodeURIComponent(cleanCode)}&birth_day=${encodeURIComponent(cleanDob)}&adhar_card=${encodeURIComponent(cleanAadhaar)}`,
+      { 'X-API-Key': ANDROID_API_KEY }
+    );
+  },
+
+  /**
+   * Reset Password for unauthenticated Employee via 3-point Identity Verification -> POST /api/mobile/ForgetPassword/
+   */
+  async resetForgotPassword(payload: {
+    empCode: string;
+    dob: string;
+    aadhaar: string;
+    newPassword?: string;
+  }) {
+    return apiClient.post<Array<{ emp_name: string; new_password?: string; message?: string }>>(
+      '/api/mobile/ForgetPassword/',
+      {
+        emp_code: payload.empCode.trim().toUpperCase(),
+        birth_day: payload.dob.trim(),
+        adhar_card: payload.aadhaar.trim(),
+        new_password: payload.newPassword?.trim(),
+      },
+      { 'X-API-Key': ANDROID_API_KEY }
+    );
   },
 };
 

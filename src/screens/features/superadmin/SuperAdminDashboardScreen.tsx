@@ -182,7 +182,7 @@ export const SuperAdminDashboardScreen: React.FC = () => {
               <Text style={styles.greetingSubtitle} numberOfLines={1}>
                 {currentUser?.username
                   ? `${currentUser.username}${currentUser?.designation ? ` • ${currentUser.designation}` : ''}`
-                  : 'IH&MS Enterprise Control'}
+                  : 'NG GLOBAL Enterprise Control'}
               </Text>
             </View>
           </View>

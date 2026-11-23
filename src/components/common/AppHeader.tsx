@@ -14,6 +14,7 @@ export interface AppHeaderProps {
   onRightAction?: () => void;
   rightComponent?: React.ReactNode;
   showNotificationBell?: boolean;
+  showTermsIcon?: boolean;
   style?: ViewStyle;
   transparent?: boolean;
 }
@@ -26,6 +27,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   onRightAction,
   rightComponent,
   showNotificationBell = false,
+  showTermsIcon = false,
   style,
   transparent = false,
 }) => {
@@ -65,6 +67,17 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       </View>
 
       <View style={styles.rightSection}>
+        {showTermsIcon && (
+          <TouchableOpacity
+            onPress={() => navigate('TermsAndConditions')}
+            style={styles.bellButton}
+            activeOpacity={0.7}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Terms and Conditions"
+          >
+            <AppIcon name="file-text" size={18} color={colors.textPrimary} />
+          </TouchableOpacity>
+        )}
         {showNotificationBell && (
           <TouchableOpacity
             onPress={() => navigate('Notifications')}

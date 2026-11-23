@@ -10,30 +10,30 @@ interface SplashScreenProps {
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({
   onFinish,
-  minDuration = 1800,
+  minDuration = 650,
 }) => {
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const scaleAnim = useRef(new Animated.Value(0.92)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
-  const [statusMessage, setStatusMessage] = useState('Initializing secure workspace...');
+  const [statusMessage, setStatusMessage] = useState('Initializing workspace...');
 
   useEffect(() => {
-    // Smooth entrance animation
+    // Fast snappy entrance animation
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 500,
+        duration: 250,
         useNativeDriver: true,
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
-        friction: 7,
-        tension: 40,
+        friction: 6,
+        tension: 50,
         useNativeDriver: true,
       }),
     ]).start();
 
-    // Progress bar fill
+    // Fast progress bar fill
     Animated.timing(progressAnim, {
       toValue: 1,
       duration: minDuration,
@@ -41,23 +41,18 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
     }).start();
 
     const t1 = setTimeout(() => {
-      setStatusMessage('Verifying device credentials...');
-    }, minDuration * 0.35);
+      setStatusMessage('Verifying credentials...');
+    }, minDuration * 0.4);
 
     const t2 = setTimeout(() => {
-      setStatusMessage('Syncing workforce tenant...');
-    }, minDuration * 0.7);
-
-    const t3 = setTimeout(() => {
       if (onFinish) {
         onFinish();
       }
-    }, minDuration + 150);
+    }, minDuration + 50);
 
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
-      clearTimeout(t3);
     };
   }, [fadeAnim, scaleAnim, progressAnim, minDuration, onFinish]);
 
@@ -102,7 +97,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({
           adjustsFontSizeToFit
           minimumFontScale={0.7}
         >
-          IH&MS-Payroll
+          NG GLOBAL
         </Text>
         <Text style={styles.appSubtitle}>
           WORKFORCE & MULTI-COMPANY PLATFORM

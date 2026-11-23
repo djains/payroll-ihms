@@ -212,7 +212,7 @@ export const SalarySlipScreen: React.FC = () => {
   const brandColor = currentCompany?.brandColor || '#2563EB';
   const empCode = currentUser?.empCode || currentUser?.username || '';
   const employeeName = currentUser?.name || (currentUser as any)?.empName || (currentUser as any)?.emp_name || currentUser?.username || 'Employee';
-  const compName = companyMeta?.companyName || currentCompany?.name || 'IH&MS INTEGRATED SOLUTIONS INDIA PRIVATE LIMITED';
+  const compName = companyMeta?.companyName || currentCompany?.name || 'NG GLOBAL INTEGRATED SOLUTIONS INDIA PRIVATE LIMITED';
   const unitCode =
     (currentUser as any)?.unitCode ||
     (currentUser as any)?.unit_code ||

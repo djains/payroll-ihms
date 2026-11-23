@@ -64,7 +64,7 @@ export const UpdatePromptModal: React.FC = () => {
               <Text style={styles.subtitle}>
                 {isDownloaded
                   ? 'The latest update has been downloaded in the background. Restart to apply now.'
-                  : 'A newer version of IHMS Payroll is available on Google Play Store with critical fixes & speed improvements.'}
+                  : 'A newer version of NG GLOBAL is available on Google Play Store with critical fixes & speed improvements.'}
               </Text>
 
               {/* Version Comparison Tag */}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, RefreshControl, TouchableOpacity, LayoutAnimation, Platform, UIManager } from 'react-native';
+import { View, Text, Image, RefreshControl, TouchableOpacity, LayoutAnimation, Platform, UIManager, Modal, TouchableWithoutFeedback } from 'react-native';
+import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './ProfileScreen.styles';
 import { AppScreenContainer, AppIcon } from '../../components/common';
@@ -10,6 +11,7 @@ import { staffApi, apiClient } from '../../api';
 import { ANDROID_API_KEY } from '../../api/config';
 import { showToast } from '../../store/toastStore';
 import { colors } from '../../theme/colors';
+import { ms } from '../../theme/responsive';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -21,6 +23,7 @@ let cachedProfileData: {
   salaryInfo: any;
   profileData: any;
   profileScope: any;
+  avatarSource?: any;
 } | null = null;
 
 export const ProfileScreen: React.FC = () => {
@@ -42,7 +45,128 @@ export const ProfileScreen: React.FC = () => {
   const [profileScope, setProfileScope] = useState<any | null>(
     (currentUser as any)?.scope || cachedProfileData?.profileScope || null
   );
+  const [avatarSource, setAvatarSource] = useState<any | null>(
+    cachedProfileData?.avatarSource ?? (currentUser?.avatarUrl ? { uri: currentUser.avatarUrl } : null)
+  );
+  const [avatarError, setAvatarError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [isPhotoModalVisible, setIsPhotoModalVisible] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  // ─── Photo Picker Handlers ──────────────────────────────────────────
+  const handleTakePhoto = () => {
+    setIsPhotoModalVisible(false);
+    setTimeout(() => {
+      launchCamera(
+        {
+          mediaType: 'photo',
+          cameraType: 'front',
+          quality: 0.8,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          includeBase64: true,
+          saveToPhotos: false,
+        },
+        async (response) => {
+          if (response.assets && response.assets.length > 0) {
+            const asset = response.assets[0];
+            if (asset.uri) {
+              await processNewAvatar(asset.uri, asset.base64);
+            }
+          }
+        }
+      );
+    }, 250);
+  };
+
+  const handleChooseFromGallery = () => {
+    setIsPhotoModalVisible(false);
+    setTimeout(() => {
+      launchImageLibrary(
+        {
+          mediaType: 'photo',
+          quality: 0.8,
+          maxWidth: 1024,
+          maxHeight: 1024,
+          includeBase64: true,
+        },
+        async (response) => {
+          if (response.assets && response.assets.length > 0) {
+            const asset = response.assets[0];
+            if (asset.uri) {
+              await processNewAvatar(asset.uri, asset.base64);
+            }
+          }
+        }
+      );
+    }, 250);
+  };
+
+  const handleRemovePhoto = () => {
+    setIsPhotoModalVisible(false);
+    setAvatarSource(null);
+    setAvatarError(false);
+    updateCurrentUser({ avatarUrl: undefined });
+    if (cachedProfileData) {
+      cachedProfileData.avatarSource = null;
+    }
+    showToast({
+      type: 'info',
+      title: 'Photo Reset',
+      message: 'Profile photo has been reset to default initials.',
+    });
+  };
+
+  const processNewAvatar = async (uri: string, base64?: string) => {
+    setUploadingPhoto(true);
+    const newSrc = { uri };
+    setAvatarSource(newSrc);
+    setAvatarError(false);
+    updateCurrentUser({ avatarUrl: uri });
+    if (cachedProfileData) {
+      cachedProfileData.avatarSource = newSrc;
+    }
+
+    showToast({
+      type: 'success',
+      title: 'Profile Photo Updated',
+      message: 'Photo updated and syncing with web portal...',
+    });
+
+    // Dual-sync to backend database so photo saves in Web Portal (Employee Master & Docs)
+    try {
+      if (empCode) {
+        const uploadPromises: Promise<any>[] = [];
+
+        // 1. Upload via modern EmployeeDocument API (for Web Employee Master Documents tab)
+        uploadPromises.push(
+          staffApi
+            .uploadEmployeeDoc(
+              empCode,
+              'Original Photo(Passport Size)',
+              uri,
+              `photo_${empCode}.jpg`
+            )
+            .catch((err) => console.warn('[ProfileScreen] Employee doc upload note:', err))
+        );
+
+        // 2. Upload via Mobile Service API (for Web Android Document Verification queue)
+        if (base64) {
+          uploadPromises.push(
+            staffApi
+              .uploadMobilePhoto(empCode, base64)
+              .catch((err) => console.warn('[ProfileScreen] Mobile photo upload note:', err))
+          );
+        }
+
+        await Promise.allSettled(uploadPromises);
+      }
+    } catch (e) {
+      console.warn('Background avatar upload note:', e);
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
   // Accordion Dropdown toggles
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -64,7 +188,7 @@ export const ProfileScreen: React.FC = () => {
   const loadProfileData = async () => {
     try {
       if (empCode) {
-        const [salRes, meRes, userDetailsRes, hrEmployeesRes, kycRes] = await Promise.allSettled([
+        const [salRes, meRes, userDetailsRes, hrEmployeesRes, kycRes, docsRes] = await Promise.allSettled([
           staffApi.getSalaryDetails(empCode),
           apiClient.request('/api/auth/me/'),
           apiClient.get<any>(`/api/mobile/GetUserDetails/?userName=${encodeURIComponent(empCode)}`, {
@@ -72,11 +196,14 @@ export const ProfileScreen: React.FC = () => {
           }),
           apiClient.get<any>(`/api/hr/employees/?search=${encodeURIComponent(empCode)}`),
           staffApi.getEmployeeKyc(empCode),
+          staffApi.getDocumentsStatus(empCode),
         ]);
 
         let newSal = salaryInfo;
         let newScope = profileScope;
         let newProf = profileData;
+        let newAvatar = avatarSource;
+        let resolvedPhotoPath: string | null = null;
 
         // 1. Process HR Employees Master record from SQL (pay_employee_master)
         if (hrEmployeesRes.status === 'fulfilled' && hrEmployeesRes.value.success && hrEmployeesRes.value.data) {
@@ -84,6 +211,7 @@ export const ProfileScreen: React.FC = () => {
           const list = Array.isArray(raw) ? raw : raw.results || [raw];
           const match = list.find((e: any) => String(e.emp_code).toLowerCase() === empCode.toLowerCase());
           if (match) {
+            resolvedPhotoPath = match.photo || match.emp_photo || match.image || match.profile_image || null;
             newProf = {
               ...newProf,
               emp_name: match.emp_name || newProf?.emp_name,
@@ -153,6 +281,42 @@ export const ProfileScreen: React.FC = () => {
               bank_status: kMatch.bank_status || (newProf as any)?.bank_status,
               bank_approve: kMatch.bank_approve,
             };
+          }
+        }
+
+        // 4. Resolve Employee Photo from verification documents (hr_document_verification / hr_employee_document)
+        if (!resolvedPhotoPath && docsRes.status === 'fulfilled' && docsRes.value.success && docsRes.value.data) {
+          const dRaw = docsRes.value.data;
+          const dList: any[] = Array.isArray(dRaw) ? dRaw : (dRaw as any).results || [];
+          const photoDoc = dList.find((d: any) => {
+            const key = String(d.image_name || d.document_type || d.image_raw || '').toLowerCase();
+            return (
+              key.includes('photo') ||
+              key.includes('passport') ||
+              key === 'passprt_size_photo' ||
+              key === 'employee_photo_upload'
+            ) && (d.file_url || d.image_path || d.image_url || d.file);
+          });
+          if (photoDoc) {
+            resolvedPhotoPath = photoDoc.file_url || photoDoc.image_path || photoDoc.image_url || photoDoc.file;
+          }
+        }
+
+        // 5. Fallback from Mobile GetUserDetails for photo
+        if (!resolvedPhotoPath && userDetailsRes.status === 'fulfilled' && userDetailsRes.value.success && userDetailsRes.value.data) {
+          const uList = userDetailsRes.value.data;
+          const uData = Array.isArray(uList) ? uList[0] : uList;
+          if (uData && (uData.EMP_PHOTO || uData.PHOTO || uData.IMAGE_PATH)) {
+            resolvedPhotoPath = uData.EMP_PHOTO || uData.PHOTO || uData.IMAGE_PATH;
+          }
+        }
+
+        if (resolvedPhotoPath) {
+          const imgSource = apiClient.getImageSource(resolvedPhotoPath);
+          if (imgSource) {
+            newAvatar = imgSource;
+            setAvatarSource(imgSource);
+            setAvatarError(false);
           }
         }
 
@@ -320,6 +484,7 @@ export const ProfileScreen: React.FC = () => {
           salaryInfo: newSal,
           profileData: newProf,
           profileScope: newScope,
+          avatarSource: newAvatar,
         };
       }
     } catch (e) {
@@ -418,9 +583,28 @@ export const ProfileScreen: React.FC = () => {
       {/* 1. HERO PROFILE CARD */}
       <View style={styles.heroCard}>
         <View style={styles.avatarContainer}>
-          <View style={[styles.avatarBadge, { backgroundColor: brandColor }]}>
-            <Text style={styles.avatarText}>{initials || currentUser.username?.substring(0, 2).toUpperCase() || 'U'}</Text>
-          </View>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            onPress={() => setIsPhotoModalVisible(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Edit profile photo"
+          >
+            <View style={[styles.avatarBadge, { backgroundColor: brandColor }]}>
+              {avatarSource && !avatarError ? (
+                <Image
+                  source={avatarSource}
+                  style={styles.avatarImage}
+                  resizeMode="cover"
+                  onError={() => setAvatarError(true)}
+                />
+              ) : (
+                <Text style={styles.avatarText}>{initials || currentUser.username?.substring(0, 2).toUpperCase() || 'U'}</Text>
+              )}
+            </View>
+            <View style={styles.cameraBadgeOverlay}>
+              <AppIcon name="camera" size={13} color="#FFFFFF" />
+            </View>
+          </TouchableOpacity>
           <View style={styles.activeStatusPill} />
         </View>
 
@@ -473,7 +657,7 @@ export const ProfileScreen: React.FC = () => {
             </View>
 
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Alternate IH&MS Code</Text>
+              <Text style={styles.infoLabel}>Alternate NG GLOBAL Code</Text>
               <Text style={styles.infoValue}>{profileData?.ihmscode || profileData?.ihms_code || '-'}</Text>
             </View>
 
@@ -848,6 +1032,81 @@ export const ProfileScreen: React.FC = () => {
           </View>
         )}
       </View>
+
+      {/* PHOTO ACTION SHEET MODAL */}
+      <Modal
+        visible={isPhotoModalVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => setIsPhotoModalVisible(false)}
+      >
+        <TouchableWithoutFeedback onPress={() => setIsPhotoModalVisible(false)}>
+          <View style={styles.photoModalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View
+                style={[
+                  styles.photoModalCard,
+                  { paddingBottom: Math.max(insets.bottom + ms(16), ms(24)) },
+                ]}
+              >
+                <View style={styles.photoModalHandle} />
+                <Text style={styles.photoModalTitle}>Profile Photo</Text>
+                <Text style={styles.photoModalSubtitle}>
+                  Choose a clear front-facing photo for your employee profile
+                </Text>
+
+                <TouchableOpacity
+                  style={styles.photoOptionItem}
+                  onPress={handleTakePhoto}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.photoOptionIconBox, { backgroundColor: '#F3E8FF' }]}>
+                    <AppIcon name="camera" size={20} color="#9333EA" />
+                  </View>
+                  <Text style={styles.photoOptionText}>Take New Photo (Camera)</Text>
+                  <AppIcon name="chevronRight" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.photoOptionItem}
+                  onPress={handleChooseFromGallery}
+                  activeOpacity={0.7}
+                >
+                  <View style={[styles.photoOptionIconBox, { backgroundColor: '#E0F2FE' }]}>
+                    <AppIcon name="image" size={20} color="#0284C7" />
+                  </View>
+                  <Text style={styles.photoOptionText}>Choose from Gallery</Text>
+                  <AppIcon name="chevronRight" size={16} color="#94A3B8" />
+                </TouchableOpacity>
+
+                {avatarSource && !avatarError && (
+                  <TouchableOpacity
+                    style={styles.photoOptionItem}
+                    onPress={handleRemovePhoto}
+                    activeOpacity={0.7}
+                  >
+                    <View style={[styles.photoOptionIconBox, { backgroundColor: '#FEE2E2' }]}>
+                      <AppIcon name="trash" size={18} color="#EF4444" />
+                    </View>
+                    <Text style={[styles.photoOptionText, { color: '#EF4444' }]}>
+                      Remove Current Photo
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={styles.photoCancelButton}
+                  onPress={() => setIsPhotoModalVisible(false)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.photoCancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </AppScreenContainer>
   );
 };

@@ -53,9 +53,7 @@ const addWorkerSchema = z
     selectedRole: z
       .string({ required_error: 'Please select an assigned role' })
       .min(1, 'Please select an assigned role'),
-    hasPhoto: z.literal(true, {
-      errorMap: () => ({ message: 'Worker verification photo is required' }),
-    }),
+    hasPhoto: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {
     const emailClean = (val.empEmail || '').trim();
@@ -208,7 +206,7 @@ export const AddStaffScreen: React.FC = () => {
         PermissionsAndroid.PERMISSIONS.CAMERA,
         {
           title: 'Camera Permission Required',
-          message: 'IHMS needs access to your camera to take the worker verification photo.',
+          message: 'NG GLOBAL needs access to your camera to take the worker verification photo.',
           buttonPositive: 'Allow',
           buttonNegative: 'Deny',
         }
@@ -432,8 +430,8 @@ export const AddStaffScreen: React.FC = () => {
         if (sendCredentialsEmail && emailTo) {
           const siteDisplay = selectedUnitObj?.unit_name || selectedUnitCode.trim() || 'Site Unit';
           const roleDisplay = selectedRole.trim() || 'Staff';
-          const subject = `IHMS Portal - Login Credentials for ${empName.trim()} (${createdCode})`;
-          const body = `Hello ${empName.trim()},\n\nWelcome to the team! Below are your official IHMS mobile app login credentials:\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n• Portal / App Link: https://ihms.app\n• Login ID (Username): ${createdCode}\n• Password: ${finalPassword}\n• Designation: ${roleDisplay}\n• Assigned Site: ${siteDisplay}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nPlease download the IHMS app and sign in with the Login ID and Password provided above.\nIf you have any questions or need assistance, please contact your unit supervisor.\n\nBest regards,\nIHMS Administration`;
+          const subject = `NG GLOBAL Portal - Login Credentials for ${empName.trim()} (${createdCode})`;
+          const body = `Hello ${empName.trim()},\n\nWelcome to the team! Below are your official NG GLOBAL mobile app login credentials:\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n• Portal / App Link: https://ihms.app\n• Login ID (Username): ${createdCode}\n• Password: ${finalPassword}\n• Designation: ${roleDisplay}\n• Assigned Site: ${siteDisplay}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\nPlease download the NG GLOBAL app and sign in with the Login ID and Password provided above.\nIf you have any questions or need assistance, please contact your unit supervisor.\n\nBest regards,\nNG GLOBAL Administration`;
 
           const mailtoUrl = `mailto:${encodeURIComponent(emailTo)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
@@ -526,11 +524,16 @@ export const AddStaffScreen: React.FC = () => {
               </View>
             ) : null}
 
-            {/* 1. Worker Photo Verification */}
+            {/* 1. Worker Photo Verification (Optional) */}
             <View style={styles.formCard}>
-              <Text style={styles.sectionTitle}>Verification Photo</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text style={styles.sectionTitle}>Verification Photo</Text>
+                <View style={styles.optionalBadge}>
+                  <Text style={styles.optionalBadgeText}>Optional</Text>
+                </View>
+              </View>
               <Text style={styles.sectionSubtitle}>
-                Worker photo required for mandatory KYC & onboarding compliance
+                Attach worker photo for profile & identity verification (optional)
               </Text>
 
               <View style={styles.photoContainer}>
@@ -571,10 +574,20 @@ export const AddStaffScreen: React.FC = () => {
                   </TouchableOpacity>
                 </View>
 
+                {workerPhoto ? (
+                  <TouchableOpacity
+                    style={styles.removePhotoBtn}
+                    onPress={() => setWorkerPhoto(null)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.removePhotoBtnText}>✕ Remove Photo</Text>
+                  </TouchableOpacity>
+                ) : null}
+
                 <Text style={styles.photoHelperText}>
                   {workerPhoto
-                    ? '✓ Photo ready for verification'
-                    : 'Tap to capture worker photo or choose from gallery'}
+                    ? '✓ Photo attached'
+                    : 'Tap to capture worker photo or choose from gallery (optional)'}
                 </Text>
               </View>
             </View>

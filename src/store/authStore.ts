@@ -578,21 +578,33 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   resetPassword: async (empCode, dob, aadhaar, newPassword) => {
     set({ isLoading: true });
     try {
-      const res = await authApi.setupPassword('', newPassword);
+      const res = await authApi.resetForgotPassword({
+        empCode,
+        dob,
+        aadhaar,
+        newPassword,
+      });
       set({ isLoading: false });
-      if (res.success) {
+      if (res.success && res.data && Array.isArray(res.data) && res.data.length > 0) {
+        const emp = res.data[0];
         showToast({
           type: 'success',
           title: 'Password Updated',
-          message: 'Your new password is now active in MySQL. Please log in.',
+          message: `Password updated successfully for ${emp.emp_name || empCode}. Please log in with your new password.`,
         });
         return true;
       }
       const errObj: any = res.error;
+      const errMsg =
+        typeof errObj === 'string'
+          ? errObj
+          : errObj?.detail ||
+            errObj?.message ||
+            'Verification details could not be matched. Please check Employee Code, Date of Birth, and Aadhaar.';
       showToast({
         type: 'error',
-        title: 'Password Reset Failed',
-        message: typeof errObj === 'string' ? errObj : errObj?.message || 'Verification details could not be verified.',
+        title: 'Reset Failed',
+        message: errMsg,
       });
       return false;
     } catch (err: any) {

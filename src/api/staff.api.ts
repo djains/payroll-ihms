@@ -35,6 +35,54 @@ export interface EmployeeKycPayload {
   nominee_relation?: string;
 }
 
+export interface BreakPunchItem {
+  break_no: number;
+  start_time?: string;
+  end_time?: string;
+}
+
+export interface BreakPunchResponse {
+  status: 'ok' | 'error';
+  message?: string;
+  emp_code?: string;
+  is_on_break: boolean;
+  current_break_no?: number | null;
+  current_break_start?: string | null;
+  punched_in_today?: boolean;
+  punched_out_today?: boolean;
+  break_start?: BreakPunchItem[];
+  break_end?: BreakPunchItem[];
+}
+
+export interface ShiftItem {
+  id: number;
+  shift_name: string;
+  shift_from: string;
+  shift_to: string;
+  working_hours?: string | number;
+}
+
+export interface DayShiftItem {
+  day: number;
+  date: string;
+  dow: string;
+  shift_id: string | number;
+  shift_name?: string;
+  shift_from?: string;
+  shift_to?: string;
+}
+
+export interface EmployeeShiftResponse {
+  emp_code: string;
+  comp_code?: string;
+  unit_code?: string;
+  month?: number;
+  year?: number;
+  today?: DayShiftItem;
+  days?: DayShiftItem[];
+  shifts?: ShiftItem[];
+}
+
 export const staffApi = {
   /**
    * Submit Leave Application -> POST /api/leave/applications/
@@ -355,6 +403,17 @@ export const staffApi = {
   },
 
   /**
+   * Fetch Employee Assigned Shifts & Monthly Shift Calendar -> GET /api/mobile/GetEmployeeShift/?emp_code=...
+   */
+  async getEmployeeShift(empCode: string, month?: number, year?: number) {
+    const today = new Date();
+    const m = month || today.getMonth() + 1;
+    const y = year || today.getFullYear();
+    const url = `${API_ENDPOINTS.MOBILE_EMPLOYEE_SHIFT}?emp_code=${encodeURIComponent(empCode)}&month=${m}&year=${y}`;
+    return apiClient.get<EmployeeShiftResponse>(url, { 'X-API-Key': ANDROID_API_KEY });
+  },
+
+  /**
    * Fetch Branch Coordinates from Mobile API -> GET /api/mobile/Getunit_Lattitude_Longtitude_Distance/?EMP_CODE=...
    */
   async getUnitCoords(empCode: string) {
@@ -400,6 +459,30 @@ export const staffApi = {
   },
 
   /**
+   * Fetch Real-time Break Status -> POST /api/attendance/break-punch/ { emp_code, action: 'STATUS' }
+   */
+  async getBreakStatus(empCode: string, compCode?: string) {
+    const payload: any = { emp_code: empCode, action: 'STATUS' };
+    if (compCode) payload.comp_code = compCode;
+    return apiClient.post<BreakPunchResponse>(API_ENDPOINTS.ATTENDANCE_BREAK, payload, {
+      'X-API-Key': ANDROID_API_KEY,
+      'Content-Type': 'application/json',
+    });
+  },
+
+  /**
+   * Record Break Start / End -> POST /api/attendance/break-punch/ { emp_code, action: 'BREAK_START' | 'BREAK_END' }
+   */
+  async recordBreak(empCode: string, action: 'BREAK_START' | 'BREAK_END', compCode?: string) {
+    const payload: any = { emp_code: empCode, action };
+    if (compCode) payload.comp_code = compCode;
+    return apiClient.post<BreakPunchResponse>(API_ENDPOINTS.ATTENDANCE_BREAK, payload, {
+      'X-API-Key': ANDROID_API_KEY,
+      'Content-Type': 'application/json',
+    });
+  },
+
+  /**
    * Fetch Next Auto-Generated Employee Code -> GET /api/hr/employees/next-code/
    */
   async getNextEmpCode() {
@@ -415,17 +498,41 @@ export const staffApi = {
 
   /**
    * Upload Employee Verification Document -> POST /api/hr/employee-documents/
+   * Validated for Web Portal Employee Master (must end with .jpg).
    */
   async uploadEmployeeDoc(empCode: string, documentType: string, fileUri: string, fileName?: string) {
     const formData = new FormData();
     formData.append('emp_code', empCode);
     formData.append('document_type', documentType);
+    const resolvedName = fileName
+      ? fileName.toLowerCase().endsWith('.jpg')
+        ? fileName
+        : `${fileName}.jpg`
+      : 'photo.jpg';
     formData.append('file', {
       uri: fileUri,
-      name: fileName || (documentType === 'Original Photo(Passport Size)' ? 'photo.jpg' : 'doc.jpg'),
+      name: resolvedName,
       type: 'image/jpeg',
     } as any);
     return apiClient.upload('/api/hr/employee-documents/', formData);
+  },
+
+  /**
+   * Upload Employee Photo via Mobile Service API -> POST /api/mobile/Employee_photo_image_send/
+   * Directly updates MySQL pay_document_verification and displays on Web Portal (Employee Master & Android Docs).
+   */
+  async uploadMobilePhoto(empCode: string, base64Photo: string) {
+    const cleanB64 = base64Photo.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+    return apiClient.post(
+      '/api/mobile/Employee_photo_image_send/',
+      {
+        EMP_CODE: empCode,
+        Upload_Image_base64: cleanB64,
+      },
+      {
+        'X-API-Key': ANDROID_API_KEY,
+      }
+    );
   },
 
   /**

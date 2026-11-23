@@ -22,9 +22,10 @@ import { useSuperAdminStore } from '../../store/superAdminStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { useNavigation } from '../../navigation/navigationContext';
 import { ScreenName } from '../../navigation/types';
-import { staffApi, authApi, apiClient, API_ENDPOINTS, ANDROID_API_KEY } from '../../api';
+import { staffApi, authApi, apiClient, API_ENDPOINTS, ANDROID_API_KEY, BreakPunchItem } from '../../api';
 import { checkForInAppUpdate } from '../../services/inAppUpdate.service';
 import { colors } from '../../theme';
+import { ms } from '../../theme/responsive';
 
 // Central In-Memory Cache for fast, zero-flicker transitions
 let cachedDashboardData: {
@@ -144,29 +145,25 @@ export const UnifiedDashboardScreen: React.FC = () => {
     userRole === 'SUPER_ADMIN' ||
     String(currentUser?.role || '').toUpperCase() === 'SUPER_ADMIN';
 
-  // Live Clock Timer
-  const [currentTime, setCurrentTime] = useState<string>(() =>
-    new Date().toLocaleTimeString('en-IN', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: true,
-    })
-  );
+  // Live Total Working Hours Count Timer
+  const [workingHoursTimer, setWorkingHoursTimer] = useState<string>('0h 00m');
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setCurrentTime(
-        new Date().toLocaleTimeString('en-IN', {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: true,
-        })
-      );
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // Break Punch State
+  const [breakStatus, setBreakStatus] = useState<{
+    isOnBreak: boolean;
+    currentBreakNo: number | null;
+    currentBreakStart: string | null;
+    breakStarts: BreakPunchItem[];
+    breakEnds: BreakPunchItem[];
+  }>({
+    isOnBreak: false,
+    currentBreakNo: null,
+    currentBreakStart: null,
+    breakStarts: [],
+    breakEnds: [],
+  });
+  const [breakLoading, setBreakLoading] = useState<boolean>(false);
+  const [breakElapsedTimer, setBreakElapsedTimer] = useState<string>('00:00:00');
 
   /**
    * Evaluate if a punch belongs to the currently active shift cycle:
@@ -735,6 +732,23 @@ export const UnifiedDashboardScreen: React.FC = () => {
         }
       }
 
+      // 1b. Process Live Break Status from /api/attendance/break-punch/
+      try {
+        const bRes = await staffApi.getBreakStatus(empCode, targetCompCode);
+        if (bRes.success && bRes.data && bRes.data.status === 'ok') {
+          const bd = bRes.data;
+          setBreakStatus({
+            isOnBreak: Boolean(bd.is_on_break),
+            currentBreakNo: bd.current_break_no ?? null,
+            currentBreakStart: bd.current_break_start ?? null,
+            breakStarts: bd.break_start || [],
+            breakEnds: bd.break_end || [],
+          });
+        }
+      } catch (bErr) {
+        console.warn('[Dashboard] Failed to fetch break status:', bErr);
+      }
+
       // 2. Process Salary
       if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
         const sList = (salRes.value.data as any).results || salRes.value.data;
@@ -1003,6 +1017,253 @@ export const UnifiedDashboardScreen: React.FC = () => {
   };
 
   const punchInfo = evaluateShiftAttendance(latestPunch);
+
+  // Live Working Hours Elapsed Count Timer: Dynamically counts up every second when shift is active
+  useEffect(() => {
+    const updateWorkingTimer = () => {
+      const pInfo = evaluateShiftAttendance(latestPunch);
+
+      // Case 1: Shift is Active (Punched IN, still working) -> Live elapsed count-up timer
+      if (pInfo.isDutyActive && pInfo.inTime !== '--:--') {
+        const parseSecs = (str: string): number | null => {
+          if (!str || str === '--:--') return null;
+          const s = String(str).trim();
+          const hasPM = /\bPM\b/i.test(s);
+          const hasAM = /\bAM\b/i.test(s);
+          const m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+          if (!m) return null;
+          let hh = parseInt(m[1], 10);
+          const mm = parseInt(m[2], 10);
+          const ss = m[3] ? parseInt(m[3], 10) : 0;
+          if (hasPM && hh < 12) hh += 12;
+          if (hasAM && hh === 12) hh = 0;
+          return hh * 3600 + mm * 60 + ss;
+        };
+
+        const inSecs = parseSecs(pInfo.inTime);
+        if (inSecs !== null) {
+          const now = new Date();
+          const curSecs = now.getHours() * 3600 + now.getMinutes() * 60 + now.getSeconds();
+          let diff = curSecs - inSecs;
+          if (diff < 0) diff += 24 * 3600; // Night shift crossing midnight
+          const h = Math.floor(diff / 3600);
+          const m = Math.floor((diff % 3600) / 60);
+          const s = diff % 60;
+          setWorkingHoursTimer(`${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`);
+          return;
+        }
+      }
+
+      // Case 2: Already punched OUT -> Finished total worked hours
+      if (pInfo.isPunchedOut && pInfo.durationText) {
+        setWorkingHoursTimer(pInfo.durationText);
+        return;
+      }
+
+      // Case 3: Not marked yet
+      setWorkingHoursTimer('0h 00m');
+    };
+
+    updateWorkingTimer();
+    const interval = setInterval(updateWorkingTimer, 1000);
+    return () => clearInterval(interval);
+  }, [latestPunch]);
+
+  // Live Break Elapsed Count Timer: Dynamically counts up every second when employee is on break
+  useEffect(() => {
+    let interval: any = null;
+    if (breakStatus.isOnBreak && breakStatus.currentBreakStart) {
+      const updateBreakTimer = () => {
+        try {
+          const parts = breakStatus.currentBreakStart!.split(':');
+          if (parts.length >= 2) {
+            const now = new Date();
+            const start = new Date();
+            start.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2] || '0', 10), 0);
+            let diffSec = Math.floor((now.getTime() - start.getTime()) / 1000);
+            if (diffSec < 0) diffSec += 24 * 3600;
+            const h = Math.floor(diffSec / 3600);
+            const m = Math.floor((diffSec % 3600) / 60);
+            const s = diffSec % 60;
+            if (h > 0) {
+              setBreakElapsedTimer(`${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`);
+            } else {
+              setBreakElapsedTimer(`${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`);
+            }
+          }
+        } catch {
+          setBreakElapsedTimer('On Break');
+        }
+      };
+
+      updateBreakTimer();
+      interval = setInterval(updateBreakTimer, 1000);
+    } else {
+      setBreakElapsedTimer('00:00:00');
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [breakStatus.isOnBreak, breakStatus.currentBreakStart]);
+
+  const handleBreakAction = async () => {
+    if (!empCode) return;
+    const isStarting = !breakStatus.isOnBreak;
+    const targetAction = isStarting ? 'BREAK_START' : 'BREAK_END';
+    const actionTitle = isStarting ? 'Start Break' : 'End Break';
+    const actionPrompt = isStarting
+      ? 'Do you want to start your break now?'
+      : 'Do you want to end your break and resume work?';
+
+    setAlertConfig({
+      visible: true,
+      type: 'info',
+      title: actionTitle,
+      message: actionPrompt,
+      buttons: [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+          onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
+        },
+        {
+          text: isStarting ? 'Start Break' : 'End Break',
+          style: 'default',
+          onPress: async () => {
+            setAlertConfig((prev) => ({ ...prev, visible: false }));
+            setBreakLoading(true);
+            try {
+              const targetCompCode = String(currentUser?.companyId || (currentUser as any)?.scope?.comp_code || '').trim();
+              const res = await staffApi.recordBreak(empCode, targetAction, targetCompCode);
+              if (res.success && res.data && res.data.status === 'ok') {
+                const bData = res.data;
+                setBreakStatus({
+                  isOnBreak: Boolean(bData.is_on_break),
+                  currentBreakNo: bData.current_break_no ?? null,
+                  currentBreakStart: bData.current_break_start ?? null,
+                  breakStarts: bData.break_start || [],
+                  breakEnds: bData.break_end || [],
+                });
+
+                setAlertConfig({
+                  visible: true,
+                  type: 'success',
+                  title: isStarting ? 'Break Started' : 'Break Ended',
+                  message: bData.message || (isStarting ? 'Your break has started.' : 'Your break has ended.'),
+                  buttons: [
+                    {
+                      text: 'OK',
+                      style: 'default',
+                      onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
+                    },
+                  ],
+                });
+              } else {
+                setAlertConfig({
+                  visible: true,
+                  type: 'danger',
+                  title: 'Break Action Failed',
+                  message: res.data?.message || res.error || 'Unable to update break status.',
+                  buttons: [
+                    {
+                      text: 'OK',
+                      style: 'default',
+                      onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
+                    },
+                  ],
+                });
+              }
+            } catch (err: any) {
+              setAlertConfig({
+                visible: true,
+                type: 'danger',
+                title: 'Error',
+                message: err.message || 'Network error while recording break.',
+                buttons: [
+                  {
+                    text: 'OK',
+                    style: 'default',
+                    onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
+                  },
+                ],
+              });
+            } finally {
+              setBreakLoading(false);
+            }
+          },
+        },
+      ],
+    });
+  };
+
+  const formatTime12h = (timeStr?: string) => {
+    if (!timeStr) return '--:--';
+    const parts = String(timeStr).trim().split(':');
+    if (parts.length < 2) return timeStr;
+    let hh = parseInt(parts[0], 10);
+    const mm = parts[1];
+    const ampm = hh >= 12 ? 'PM' : 'AM';
+    hh = hh % 12 || 12;
+    return `${String(hh).padStart(2, '0')}:${mm} ${ampm}`;
+  };
+
+  const formatBreakDuration = (startStr?: string, endStr?: string) => {
+    if (!startStr || !endStr) return '';
+    try {
+      const [sH, sM, sS] = startStr.split(':').map((x) => parseInt(x, 10) || 0);
+      const [eH, eM, eS] = endStr.split(':').map((x) => parseInt(x, 10) || 0);
+      let diffSec = (eH * 3600 + eM * 60 + eS) - (sH * 3600 + sM * 60 + sS);
+      if (diffSec < 0) diffSec += 24 * 3600;
+      const m = Math.floor(diffSec / 60);
+      const s = diffSec % 60;
+      if (m >= 60) {
+        const h = Math.floor(m / 60);
+        const remM = m % 60;
+        return `${h}h ${remM}m`;
+      }
+      if (m > 0) return `${m}m ${s > 0 ? `${s}s` : ''}`.trim();
+      return `${s}s`;
+    } catch {
+      return '';
+    }
+  };
+
+  const completedBreaks = useMemo(() => {
+    const ends = breakStatus.breakEnds || [];
+    const starts = breakStatus.breakStarts || [];
+    return ends.map((endItem) => {
+      const startItem = starts.find((s) => s.break_no === endItem.break_no);
+      const durationText = formatBreakDuration(startItem?.start_time, endItem.end_time);
+      return {
+        break_no: endItem.break_no,
+        startTime: startItem?.start_time,
+        endTime: endItem.end_time,
+        formattedStart: formatTime12h(startItem?.start_time),
+        formattedEnd: formatTime12h(endItem.end_time),
+        durationText,
+      };
+    });
+  }, [breakStatus.breakStarts, breakStatus.breakEnds]);
+
+  const totalBreakDurationMinutes = useMemo(() => {
+    let totalSec = 0;
+    const ends = breakStatus.breakEnds || [];
+    const starts = breakStatus.breakStarts || [];
+    ends.forEach((endItem) => {
+      const startItem = starts.find((s) => s.break_no === endItem.break_no);
+      if (startItem?.start_time && endItem?.end_time) {
+        try {
+          const [sH, sM, sS] = startItem.start_time.split(':').map((x) => parseInt(x, 10) || 0);
+          const [eH, eM, eS] = endItem.end_time.split(':').map((x) => parseInt(x, 10) || 0);
+          let diff = (eH * 3600 + eM * 60 + eS) - (sH * 3600 + sM * 60 + sS);
+          if (diff < 0) diff += 24 * 3600;
+          totalSec += diff;
+        } catch {}
+      }
+    });
+    return Math.round(totalSec / 60);
+  }, [breakStatus.breakStarts, breakStatus.breakEnds]);
 
   const lastMonthName = latestSalaryMonthLabel || 'View Slips';
 
@@ -1504,6 +1765,17 @@ export const UnifiedDashboardScreen: React.FC = () => {
           </TouchableOpacity>
 
           <View style={styles.headerRightGroup}>
+            {/* Terms & Conditions / Google Play Policy Icon (Left of Notifications) */}
+            <TouchableOpacity
+              style={styles.bellButton}
+              onPress={() => navigate('TermsAndConditions')}
+              activeOpacity={0.7}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Terms and Conditions"
+            >
+              <AppIcon name="file-text" size={18} color="#334155" />
+            </TouchableOpacity>
+
             {/* Global Notification Bell Icon (Left of Logout) */}
             <TouchableOpacity
               style={styles.bellButton}
@@ -1634,21 +1906,33 @@ export const UnifiedDashboardScreen: React.FC = () => {
 
         {/* Shift Attendance Card (Shown if user has attendance menu access) */}
         {canAccessPunch && (
-          <TouchableOpacity
-            style={styles.compactPunchCard}
-            activeOpacity={0.88}
-            onPress={() => navigate('GeofencePunch')}
-          >
-            <View style={styles.punchCardHeaderRow}>
+          <View style={styles.compactPunchCard}>
+            <TouchableOpacity
+              style={styles.punchCardHeaderRow}
+              activeOpacity={0.8}
+              onPress={() => navigate('GeofencePunch')}
+            >
               <View style={styles.punchHeaderLeft}>
                 <View style={styles.punchIconCircle}>
                   <AppIcon name="fingerprint" size={20} color="#0D9488" />
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, marginRight: ms(6) }}>
                   <View style={styles.punchCardTitleRow}>
-                    <Text style={styles.punchCardTitle}>Shift Attendance</Text>
+                    <Text
+                      style={styles.punchCardTitle}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      Shift Attendance
+                    </Text>
                   </View>
-                  <Text style={styles.punchCardSubtitle} numberOfLines={1}>
+                  <Text
+                    style={styles.punchCardSubtitle}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
                     {punchInfo.distanceText}
                   </Text>
                 </View>
@@ -1659,34 +1943,96 @@ export const UnifiedDashboardScreen: React.FC = () => {
                   style={[
                     styles.punchStatusPill,
                     {
-                      backgroundColor: punchInfo.statusBg,
-                      borderColor: punchInfo.statusBorder,
+                      backgroundColor: breakStatus.isOnBreak ? '#FEF3C7' : punchInfo.statusBg,
+                      borderColor: breakStatus.isOnBreak ? '#FDE68A' : punchInfo.statusBorder,
                     },
                   ]}
                 >
                   <AppIcon
-                    name={punchInfo.statusIcon as any}
+                    name={breakStatus.isOnBreak ? 'coffee' : (punchInfo.statusIcon as any)}
                     size={11}
-                    color={punchInfo.statusColor}
+                    color={breakStatus.isOnBreak ? '#D97706' : punchInfo.statusColor}
                   />
-                  <Text style={[styles.punchStatusPillText, { color: punchInfo.statusColor }]}>
-                    {punchInfo.statusLabel}
+                  <Text
+                    style={[
+                      styles.punchStatusPillText,
+                      { color: breakStatus.isOnBreak ? '#D97706' : punchInfo.statusColor },
+                    ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    {breakStatus.isOnBreak ? 'ON BREAK' : punchInfo.statusLabel}
                   </Text>
                 </View>
 
                 <View style={styles.liveClockBadge}>
-                  <AppIcon name="clock" size={10} color="#0D9488" />
-                  <Text style={styles.liveClockText}>{currentTime}</Text>
+                  <AppIcon name="clock" size={10} color={breakStatus.isOnBreak ? '#D97706' : '#0D9488'} />
+                  <Text
+                    style={[styles.liveClockText, breakStatus.isOnBreak && { color: '#D97706' }]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    {breakStatus.isOnBreak ? breakElapsedTimer : workingHoursTimer}
+                  </Text>
                 </View>
               </View>
-            </View>
+            </TouchableOpacity>
+
+            {/* Active Break Banner */}
+            {breakStatus.isOnBreak && (
+              <View style={styles.breakActiveBanner}>
+                <View style={styles.breakBannerLeft}>
+                  <View style={styles.breakCupCircle}>
+                    <AppIcon name="coffee" size={14} color="#D97706" />
+                  </View>
+                  <View style={{ flex: 1, marginRight: ms(6) }}>
+                    <Text
+                      style={styles.breakBannerTitle}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      Break #{breakStatus.currentBreakNo || 1} in Progress
+                    </Text>
+                    <Text
+                      style={styles.breakBannerSub}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.8}
+                    >
+                      Started at {breakStatus.currentBreakStart || 'Recently'} • {breakElapsedTimer}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.breakPulsePill}>
+                  <View style={styles.breakPulseDot} />
+                  <Text
+                    style={styles.breakPulseText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    ACTIVE
+                  </Text>
+                </View>
+              </View>
+            )}
 
             {/* Timings */}
             <View style={styles.timingSection}>
               <View style={styles.timeRecordRow}>
                 <View style={styles.timeRecordLabelWrap}>
                   <View style={[styles.timeDot, { backgroundColor: '#10B981' }]} />
-                  <Text style={styles.timeRecordLabel}>IN TIME</Text>
+                  <Text
+                    style={styles.timeRecordLabel}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    IN TIME
+                  </Text>
                 </View>
                 <View style={styles.timeValueWrap}>
                   <View
@@ -1706,6 +2052,9 @@ export const UnifiedDashboardScreen: React.FC = () => {
                       styles.timeRecordValue,
                       punchInfo.inTime !== '--:--' && styles.timeRecordValueActive,
                     ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
                   >
                     {punchInfo.inTime}
                   </Text>
@@ -1717,7 +2066,14 @@ export const UnifiedDashboardScreen: React.FC = () => {
               <View style={styles.timeRecordRow}>
                 <View style={styles.timeRecordLabelWrap}>
                   <View style={[styles.timeDot, { backgroundColor: '#EF4444' }]} />
-                  <Text style={styles.timeRecordLabel}>OUT TIME</Text>
+                  <Text
+                    style={styles.timeRecordLabel}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    OUT TIME
+                  </Text>
                 </View>
                 <View style={styles.timeValueWrap}>
                   <View
@@ -1737,11 +2093,54 @@ export const UnifiedDashboardScreen: React.FC = () => {
                       styles.timeRecordValue,
                       punchInfo.outTime !== '--:--' && styles.timeRecordValueActive,
                     ]}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
                   >
                     {punchInfo.outTime}
                   </Text>
                 </View>
               </View>
+
+              {/* Total Breaks Row in Timing Section */}
+              {completedBreaks.length > 0 && (
+                <>
+                  <View style={styles.timeDivider} />
+                  <View style={styles.timeRecordRow}>
+                    <View style={styles.timeRecordLabelWrap}>
+                      <View style={[styles.timeDot, { backgroundColor: '#F59E0B' }]} />
+                      <Text
+                        style={styles.timeRecordLabel}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.85}
+                      >
+                        TOTAL BREAKS
+                      </Text>
+                    </View>
+                    <View style={styles.timeValueWrap}>
+                      <View
+                        style={[styles.timeBadgeIcon, { backgroundColor: '#FEF3C7' }]}
+                      >
+                        <AppIcon name="coffee" size={13} color="#D97706" />
+                      </View>
+                      <Text
+                        style={[
+                          styles.timeRecordValue,
+                          styles.timeRecordValueActive,
+                          { color: '#B45309' },
+                        ]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.85}
+                      >
+                        {completedBreaks.length} {completedBreaks.length === 1 ? 'Break' : 'Breaks'}
+                        {totalBreakDurationMinutes > 0 ? ` (${totalBreakDurationMinutes}m)` : ''}
+                      </Text>
+                    </View>
+                  </View>
+                </>
+              )}
 
               {punchInfo.isPunchedOut && (
                 <>
@@ -1749,7 +2148,14 @@ export const UnifiedDashboardScreen: React.FC = () => {
                   <View style={styles.timeRecordRow}>
                     <View style={styles.timeRecordLabelWrap}>
                       <View style={[styles.timeDot, { backgroundColor: punchInfo.statusColor }]} />
-                      <Text style={styles.timeRecordLabel}>TOTAL WORKED</Text>
+                      <Text
+                        style={styles.timeRecordLabel}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.85}
+                      >
+                        TOTAL WORKED
+                      </Text>
                     </View>
                     <View style={styles.timeValueWrap}>
                       <View
@@ -1763,6 +2169,9 @@ export const UnifiedDashboardScreen: React.FC = () => {
                           styles.timeRecordValueActive,
                           { color: punchInfo.statusColor },
                         ]}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.85}
                       >
                         {punchInfo.durationText}
                       </Text>
@@ -1772,25 +2181,206 @@ export const UnifiedDashboardScreen: React.FC = () => {
               )}
             </View>
 
-            {/* Action Punch Button */}
-            <View style={[styles.heroPunchBtn, { backgroundColor: brandColor }]}>
-              <View style={styles.heroPunchBtnInner}>
-                <View style={styles.heroPunchIconCircle}>
-                  <AppIcon name="fingerprint" size={18} color="#FFFFFF" />
+            {/* Completed Breaks Detailed Breakdown (Visible after break ends) */}
+            {completedBreaks.length > 0 && (
+              <View style={styles.completedBreaksContainer}>
+                <View style={styles.completedBreaksHeader}>
+                  <View style={styles.completedBreaksHeaderLeft}>
+                    <View style={styles.breakHistoryIconCircle}>
+                      <AppIcon name="coffee" size={13} color="#D97706" />
+                    </View>
+                    <Text
+                      style={styles.completedBreaksTitle}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.85}
+                    >
+                      Total Break Count: {completedBreaks.length}
+                    </Text>
+                  </View>
+                  {totalBreakDurationMinutes > 0 && (
+                    <View style={styles.totalBreakDurationBadge}>
+                      <Text
+                        style={styles.totalBreakDurationText}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.85}
+                      >
+                        {totalBreakDurationMinutes}m total
+                      </Text>
+                    </View>
+                  )}
                 </View>
-                <Text style={styles.heroPunchBtnText}>
-                  {punchInfo.isDutyActive
-                    ? 'Mark Shift OUT'
-                    : punchInfo.isPunchedOut
-                    ? 'View / Re-punch'
-                    : 'Mark Shift IN'}
-                </Text>
+
+                <View style={styles.breaksList}>
+                  {completedBreaks.map((b) => (
+                    <View key={b.break_no} style={styles.breakRowItem}>
+                      <View style={styles.breakItemLeft}>
+                        <View style={styles.breakItemDot} />
+                        <Text
+                          style={styles.breakItemLabel}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.85}
+                        >
+                          Break #{b.break_no}
+                        </Text>
+                      </View>
+                      <View style={styles.breakItemRight}>
+                        <Text
+                          style={styles.breakItemTime}
+                          numberOfLines={1}
+                          adjustsFontSizeToFit
+                          minimumFontScale={0.85}
+                        >
+                          {b.formattedStart} - {b.formattedEnd}
+                        </Text>
+                        {b.durationText ? (
+                          <Text
+                            style={styles.breakItemDuration}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit
+                            minimumFontScale={0.85}
+                          >
+                            {b.durationText}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  ))}
+                </View>
               </View>
-              <View style={styles.heroPunchArrowCircle}>
-                <AppIcon name="chevronRight" size={14} color="#FFFFFF" />
+            )}
+
+            {/* Action Buttons: Dual Action when Duty is Active, Single Action otherwise */}
+            {punchInfo.isDutyActive ? (
+              <View style={styles.punchActionBtnRow}>
+                {/* Break Start / End Button */}
+                <TouchableOpacity
+                  style={[
+                    styles.breakActionBtn,
+                    breakStatus.isOnBreak ? styles.breakEndBtn : styles.breakStartBtn,
+                  ]}
+                  activeOpacity={0.85}
+                  onPress={handleBreakAction}
+                  disabled={breakLoading}
+                >
+                  {breakLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <View style={styles.breakActionIconWrap}>
+                        <AppIcon
+                          name={breakStatus.isOnBreak ? 'play' : 'coffee'}
+                          size={13}
+                          color="#FFFFFF"
+                        />
+                      </View>
+                      <Text
+                        style={styles.breakActionBtnText}
+                        numberOfLines={1}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.8}
+                      >
+                        {breakStatus.isOnBreak ? 'End Break' : 'Start Break'}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+
+                {/* Mark Shift OUT Button */}
+                <TouchableOpacity
+                  style={[styles.shiftPunchBtn, { backgroundColor: '#EF4444' }]}
+                  activeOpacity={0.88}
+                  onPress={() => {
+                    if (breakStatus.isOnBreak) {
+                      setAlertConfig({
+                        visible: true,
+                        type: 'warning',
+                        title: 'Active Break in Progress',
+                        message: 'You are currently on break. Please end your break before punching out.',
+                        buttons: [
+                          {
+                            text: 'End Break Now',
+                            style: 'default',
+                            onPress: () => {
+                              setAlertConfig((prev) => ({ ...prev, visible: false }));
+                              handleBreakAction();
+                            },
+                          },
+                          {
+                            text: 'Cancel',
+                            style: 'cancel',
+                            onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
+                          },
+                        ],
+                      });
+                      return;
+                    }
+                    navigate('GeofencePunch');
+                  }}
+                >
+                  <View style={styles.shiftPunchIconWrap}>
+                    <AppIcon name="fingerprint" size={14} color="#FFFFFF" />
+                  </View>
+                  <Text
+                    style={styles.shiftPunchBtnText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.8}
+                  >
+                    Shift OUT
+                  </Text>
+                </TouchableOpacity>
               </View>
-            </View>
-          </TouchableOpacity>
+            ) : punchInfo.isPunchedOut ? (
+              <TouchableOpacity
+                style={[styles.heroPunchBtn, { backgroundColor: '#64748B' }]}
+                activeOpacity={0.88}
+                onPress={() => navigate('GeofencePunch')}
+              >
+                <View style={styles.heroPunchBtnInner}>
+                  <View style={styles.heroPunchIconCircle}>
+                    <AppIcon name="fingerprint" size={18} color="#FFFFFF" />
+                  </View>
+                  <Text
+                    style={styles.heroPunchBtnText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    View / Re-punch
+                  </Text>
+                </View>
+                <View style={styles.heroPunchArrowCircle}>
+                  <AppIcon name="chevronRight" size={14} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.heroPunchBtn, { backgroundColor: brandColor }]}
+                activeOpacity={0.88}
+                onPress={() => navigate('GeofencePunch')}
+              >
+                <View style={styles.heroPunchBtnInner}>
+                  <View style={styles.heroPunchIconCircle}>
+                    <AppIcon name="fingerprint" size={18} color="#FFFFFF" />
+                  </View>
+                  <Text
+                    style={styles.heroPunchBtnText}
+                    numberOfLines={1}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.85}
+                  >
+                    Mark Shift IN
+                  </Text>
+                </View>
+                <View style={styles.heroPunchArrowCircle}>
+                  <AppIcon name="chevronRight" size={14} color="#FFFFFF" />
+                </View>
+              </TouchableOpacity>
+            )}
+          </View>
         )}
 
         {/* DYNAMIC FEATURE CARDS GRID */}

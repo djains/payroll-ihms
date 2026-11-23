@@ -14,3 +14,4 @@ export * from './CustomAlertModal';
 export * from './OfflineBanner';
 export * from './NotificationModal';
 export * from './UpdatePromptModal';
+export * from './PermissionPromptModal';

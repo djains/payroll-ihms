@@ -135,7 +135,7 @@ export function generateCrystalPayslipHtml(
     companyAddress2?: string;
   }
 ): string {
-  const compName = options?.companyName || 'IH&MS INTEGRATED SOLUTIONS INDIA PRIVATE LIMITED';
+  const compName = options?.companyName || 'NG GLOBAL INTEGRATED SOLUTIONS INDIA PRIVATE LIMITED';
   const compAddr1 = options?.companyAddress1 || '304, 3RD FLOOR, NYATI MILLENNIUM, DATTA MANDIR CHOWK';
   const compAddr2 = options?.companyAddress2 || 'VIMAN NAGAR, PUNE -411014,PUNE,MAHARASHTRA';
 
@@ -651,11 +651,11 @@ export function generateCrystalPayslipHtml(
           <div class="top-badge">Pay Slip For ${mLabel}</div>
         </div>
 
-        <!-- Official Header with Authentic IH&MS Logo & Company Details -->
+        <!-- Official Header with Authentic NG GLOBAL Logo & Company Details -->
         <table class="header-table">
           <tr>
             <td class="header-logo-cell">
-              <img src="${IHMS_LOGO_BASE64}" alt="IH&MS" class="header-logo-img" />
+              <img src="${IHMS_LOGO_BASE64}" alt="NG GLOBAL" class="header-logo-img" />
             </td>
             <td class="header-info-cell">
               <div class="comp-title">${compName}</div>

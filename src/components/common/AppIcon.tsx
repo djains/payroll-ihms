@@ -626,7 +626,13 @@ export const AppIcon: React.FC<AppIconProps> = ({
 
 
   // 4. Shield Icon (Security / App Branding)
-  if (name === 'shield') {
+  if (
+    name === 'shield' ||
+    name === 'shield-check' ||
+    name === 'shield-checkmark' ||
+    name === 'shieldCheck' ||
+    name === 'security'
+  ) {
     const sWidth = Math.round(scaledSize * 0.78);
     const sHeight = Math.round(scaledSize * 0.88);
     return (
@@ -1112,8 +1118,19 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  // 5. Audit / Document / File-Text
-  if (name === 'audit' || name === 'clipboard' || name === 'document' || name === 'file-text' || name === 'receipt') {
+  // 5. Audit / Document / File-Text / Terms / Privacy / Legal
+  if (
+    name === 'audit' ||
+    name === 'clipboard' ||
+    name === 'document' ||
+    name === 'document-text' ||
+    name === 'file-text' ||
+    name === 'receipt' ||
+    name === 'terms' ||
+    name === 'policy' ||
+    name === 'privacy' ||
+    name === 'legal'
+  ) {
     const docW = Math.round(scaledSize * 0.65);
     const docH = Math.round(scaledSize * 0.82);
     return (
@@ -1165,38 +1182,46 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  // 7. Location / Map Pin (Feather vector icon with safe fallback)
-  if (name === 'location' || name === 'map-pin') {
-    try {
-      return (
-        <Feather
-          name="map-pin"
-          size={scaledSize}
-          color={color}
-          style={style as TextStyle}
-        />
-      );
-    } catch {
-      const pinW = Math.round(scaledSize * 0.6);
-      const pinH = Math.round(scaledSize * 0.8);
-      return (
-        <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+  // 7. Location / Map Pin (Pure vector precision pin)
+  if (name === 'location' || name === 'map-pin' || name === 'gps' || name === 'pin') {
+    const pinW = Math.round(scaledSize * 0.58);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View
+          style={{
+            width: pinW,
+            height: pinW,
+            borderRadius: pinW / 2,
+            borderWidth: stroke,
+            borderColor: color,
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2,
+          }}
+        >
           <View
             style={{
-              width: pinW,
-              height: pinH * 0.7,
-              borderRadius: pinW / 2,
-              borderWidth: stroke,
-              borderColor: color,
-              alignItems: 'center',
-              justifyContent: 'center',
+              width: pinW * 0.36,
+              height: pinW * 0.36,
+              borderRadius: (pinW * 0.36) / 2,
+              backgroundColor: color,
             }}
-          >
-            <View style={{ width: pinW * 0.35, height: pinW * 0.35, borderRadius: pinW * 0.2, backgroundColor: color }} />
-          </View>
+          />
         </View>
-      );
-    }
+        <View
+          style={{
+            width: pinW * 0.44,
+            height: pinW * 0.44,
+            borderRightWidth: stroke,
+            borderBottomWidth: stroke,
+            borderColor: color,
+            transform: [{ rotate: '45deg' }],
+            marginTop: -pinW * 0.22,
+            zIndex: 1,
+          }}
+        />
+      </View>
+    );
   }
 
   // Check / Verified Badge Icon (Feather vector check-circle with safe fallback)
@@ -1263,34 +1288,53 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  // Clock / Time Icon (Using native Feather vector font icon for pixel-perfect render)
+  // Clock / Time Icon (Pure vector geometry)
   if (name === 'clock' || name === 'time') {
-    try {
-      return (
-        <Feather
-          name="clock"
-          size={scaledSize}
-          color={color}
-          style={style as TextStyle}
-        />
-      );
-    } catch {
-      // Fallback if font fails
-      const cSize = Math.round(scaledSize * 0.88);
-      return (
-        <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+    const cSize = Math.round(scaledSize * 0.86);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View
+          style={{
+            width: cSize,
+            height: cSize,
+            borderRadius: cSize / 2,
+            borderWidth: stroke,
+            borderColor: color,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <View
             style={{
-              width: cSize,
-              height: cSize,
-              borderRadius: cSize / 2,
-              borderWidth: stroke,
-              borderColor: color,
+              position: 'absolute',
+              width: stroke,
+              height: cSize * 0.28,
+              backgroundColor: color,
+              top: cSize * 0.22,
+              borderRadius: stroke / 2,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              height: stroke,
+              width: cSize * 0.24,
+              backgroundColor: color,
+              left: cSize * 0.5 - stroke / 2,
+              borderRadius: stroke / 2,
+            }}
+          />
+          <View
+            style={{
+              width: stroke * 1.5,
+              height: stroke * 1.5,
+              borderRadius: stroke,
+              backgroundColor: color,
             }}
           />
         </View>
-      );
-    }
+      </View>
+    );
   }
 
   // Arrow In / Log In / Check-in Icon
@@ -1755,7 +1799,12 @@ export const AppIcon: React.FC<AppIconProps> = ({
   // 9. Navigation Chevrons & Arrows (Matching Screenshot)
   const chevronSize = Math.round(scaledSize * 0.42);
 
-  if (name === 'chevronRight' || name === 'chevron-right') {
+  if (
+    name === 'chevronRight' ||
+    name === 'chevron-right' ||
+    name === 'chevron-forward' ||
+    name === 'chevronForward'
+  ) {
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
         <View
@@ -1865,122 +1914,145 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  if (name === 'bell') {
+  if (name === 'bell' || name === 'notifications' || name === 'notification') {
     const bellW = Math.round(scaledSize * 0.68);
-    const bellH = Math.round(scaledSize * 0.7);
+    const bellH = Math.round(scaledSize * 0.72);
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-        <View style={{ width: bellW, height: bellH * 0.8, borderWidth: stroke, borderTopLeftRadius: bellW / 2, borderTopRightRadius: bellW / 2, borderColor: color }} />
-        <View style={{ width: bellW * 0.3, height: stroke * 1.5, borderRadius: stroke, backgroundColor: color, marginTop: ms(1) }} />
+        {/* Top Handle Loop */}
+        <View
+          style={{
+            width: stroke * 2.2,
+            height: stroke * 2,
+            borderTopLeftRadius: stroke,
+            borderTopRightRadius: stroke,
+            borderWidth: stroke * 0.9,
+            borderBottomWidth: 0,
+            borderColor: color,
+            marginBottom: -ms(1),
+          }}
+        />
+        {/* Bell Body Dome */}
+        <View
+          style={{
+            width: bellW,
+            height: bellH * 0.72,
+            borderWidth: stroke,
+            borderTopLeftRadius: bellW * 0.48,
+            borderTopRightRadius: bellW * 0.48,
+            borderBottomLeftRadius: ms(3),
+            borderBottomRightRadius: ms(3),
+            borderColor: color,
+          }}
+        />
+        {/* Bottom Rim Bar */}
+        <View
+          style={{
+            width: bellW * 1.18,
+            height: stroke * 1.2,
+            backgroundColor: color,
+            borderRadius: stroke * 0.6,
+            marginTop: -stroke * 0.4,
+          }}
+        />
+        {/* Clapper / Hammer */}
+        <View
+          style={{
+            width: bellW * 0.28,
+            height: bellW * 0.2,
+            borderBottomLeftRadius: bellW * 0.14,
+            borderBottomRightRadius: bellW * 0.14,
+            backgroundColor: color,
+            marginTop: stroke * 0.3,
+          }}
+        />
       </View>
     );
   }
 
-  // 10. Logout / Log-Out (Native Feather log-out with safe vector fallback)
+  // 10. Logout / Log-Out (Pure vector geometry)
   if (name === 'logout' || name === 'log-out') {
-    try {
-      return (
-        <Feather
-          name="log-out"
-          size={scaledSize}
-          color={color}
-          style={style as TextStyle}
-        />
-      );
-    } catch {
-      const boxW = Math.round(scaledSize * 0.78);
-      const boxH = Math.round(scaledSize * 0.85);
-      const arrowW = Math.round(scaledSize * 0.48);
-      const arrowHead = Math.round(scaledSize * 0.28);
-      return (
-        <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-          <View style={{ width: boxW, height: boxH, position: 'relative', justifyContent: 'center' }}>
-            {/* Door / bracket frame */}
+    const boxW = Math.round(scaledSize * 0.78);
+    const boxH = Math.round(scaledSize * 0.85);
+    const arrowW = Math.round(scaledSize * 0.48);
+    const arrowHead = Math.round(scaledSize * 0.28);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ width: boxW, height: boxH, position: 'relative', justifyContent: 'center' }}>
+          {/* Door / bracket frame */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: boxW * 0.62,
+              height: boxH,
+              borderTopWidth: stroke,
+              borderLeftWidth: stroke,
+              borderBottomWidth: stroke,
+              borderColor: color,
+              borderTopLeftRadius: ms(4),
+              borderBottomLeftRadius: ms(4),
+            }}
+          />
+          {/* Exit arrow pointing right */}
+          <View
+            style={{
+              position: 'absolute',
+              right: 0,
+              flexDirection: 'row',
+              alignItems: 'center',
+              width: arrowW,
+            }}
+          >
+            <View style={{ flex: 1, height: stroke, backgroundColor: color }} />
             <View
               style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: boxW * 0.62,
-                height: boxH,
+                width: arrowHead,
+                height: arrowHead,
                 borderTopWidth: stroke,
-                borderLeftWidth: stroke,
-                borderBottomWidth: stroke,
+                borderRightWidth: stroke,
                 borderColor: color,
-                borderTopLeftRadius: ms(4),
-                borderBottomLeftRadius: ms(4),
+                transform: [{ rotate: '45deg' }, { translateX: -1 }],
               }}
             />
-            {/* Exit arrow pointing right */}
-            <View
-              style={{
-                position: 'absolute',
-                right: 0,
-                flexDirection: 'row',
-                alignItems: 'center',
-                width: arrowW,
-              }}
-            >
-              <View style={{ flex: 1, height: stroke, backgroundColor: color }} />
-              <View
-                style={{
-                  width: arrowHead,
-                  height: arrowHead,
-                  borderTopWidth: stroke,
-                  borderRightWidth: stroke,
-                  borderColor: color,
-                  transform: [{ rotate: '45deg' }, { translateX: -1 }],
-                }}
-              />
-            </View>
           </View>
         </View>
-      );
-    }
+      </View>
+    );
   }
 
-  // 11. Home / Unit / Branch Icon (Feather vector icon with safe fallback)
+  // 11. Home / Unit / Branch Icon (Pure vector geometry)
   if (name === 'home' || name === 'unit' || name === 'branch') {
-    try {
-      return (
-        <Feather
-          name="home"
-          size={scaledSize}
-          color={color}
-          style={style as TextStyle}
-        />
-      );
-    } catch {
-      const hW = Math.round(scaledSize * 0.76);
-      const hH = Math.round(scaledSize * 0.74);
-      return (
-        <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-          <View style={{ width: hW, height: hH, alignItems: 'center' }}>
-            <View
-              style={{
-                width: hW * 0.7,
-                height: hW * 0.7,
-                borderTopWidth: stroke,
-                borderLeftWidth: stroke,
-                borderColor: color,
-                transform: [{ rotate: '45deg' }, { translateY: ms(3) }],
-              }}
-            />
-            <View
-              style={{
-                width: hW * 0.76,
-                height: hH * 0.52,
-                borderLeftWidth: stroke,
-                borderRightWidth: stroke,
-                borderBottomWidth: stroke,
-                borderColor: color,
-                marginTop: -ms(2),
-              }}
-            />
-          </View>
+    const hW = Math.round(scaledSize * 0.76);
+    const hH = Math.round(scaledSize * 0.74);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ width: hW, height: hH, alignItems: 'center' }}>
+          <View
+            style={{
+              width: hW * 0.7,
+              height: hW * 0.7,
+              borderTopWidth: stroke,
+              borderLeftWidth: stroke,
+              borderColor: color,
+              transform: [{ rotate: '45deg' }, { translateY: ms(3) }],
+            }}
+          />
+          <View
+            style={{
+              width: hW * 0.76,
+              height: hH * 0.52,
+              borderLeftWidth: stroke,
+              borderRightWidth: stroke,
+              borderBottomWidth: stroke,
+              borderColor: color,
+              marginTop: -ms(2),
+            }}
+          />
         </View>
-      );
-    }
+      </View>
+    );
   }
 
   // Identity / Aadhaar Card
@@ -2571,31 +2643,20 @@ export const AppIcon: React.FC<AppIconProps> = ({
 
   // Maximize / Full Screen Icon
   if (name === 'maximize' || name === 'fullscreen' || name === 'expand') {
-    try {
-      return (
-        <Feather
-          name="maximize-2"
-          size={scaledSize}
-          color={color}
-          style={style as TextStyle}
+    const s = Math.round(scaledSize * 0.75);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View
+          style={{
+            width: s,
+            height: s,
+            borderWidth: stroke,
+            borderColor: color,
+            borderRadius: 2,
+          }}
         />
-      );
-    } catch {
-      const s = Math.round(scaledSize * 0.75);
-      return (
-        <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-          <View
-            style={{
-              width: s,
-              height: s,
-              borderWidth: stroke,
-              borderColor: color,
-              borderRadius: 2,
-            }}
-          />
-        </View>
-      );
-    }
+      </View>
+    );
   }
 
   // 17. Check & Close
@@ -2622,6 +2683,84 @@ export const AppIcon: React.FC<AppIconProps> = ({
         <Text style={{ fontSize: scaledSize * 0.8, color, fontWeight: '300', textAlign: 'center', lineHeight: scaledSize }}>
           ✕
         </Text>
+      </View>
+    );
+  }
+
+  // Settings / Gear / Cog Icon
+  if (name === 'settings' || name === 'gear' || name === 'cog') {
+    const s = Math.round(scaledSize * 0.76);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        {/* Outer Ring */}
+        <View
+          style={{
+            width: s,
+            height: s,
+            borderRadius: s / 2,
+            borderWidth: stroke * 1.2,
+            borderColor: color,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {/* Center Hole */}
+          <View
+            style={{
+              width: s * 0.38,
+              height: s * 0.38,
+              borderRadius: (s * 0.38) / 2,
+              borderWidth: stroke,
+              borderColor: color,
+            }}
+          />
+        </View>
+        {/* Cross Teeth (Vertical) */}
+        <View
+          style={{
+            position: 'absolute',
+            width: stroke * 1.4,
+            height: s * 1.18,
+            backgroundColor: color,
+            borderRadius: stroke * 0.5,
+            zIndex: -1,
+          }}
+        />
+        {/* Cross Teeth (Horizontal) */}
+        <View
+          style={{
+            position: 'absolute',
+            width: s * 1.18,
+            height: stroke * 1.4,
+            backgroundColor: color,
+            borderRadius: stroke * 0.5,
+            zIndex: -1,
+          }}
+        />
+        {/* Diagonal Teeth (45 deg) */}
+        <View
+          style={{
+            position: 'absolute',
+            width: stroke * 1.4,
+            height: s * 1.18,
+            backgroundColor: color,
+            borderRadius: stroke * 0.5,
+            transform: [{ rotate: '45deg' }],
+            zIndex: -1,
+          }}
+        />
+        {/* Diagonal Teeth (-45 deg) */}
+        <View
+          style={{
+            position: 'absolute',
+            width: stroke * 1.4,
+            height: s * 1.18,
+            backgroundColor: color,
+            borderRadius: stroke * 0.5,
+            transform: [{ rotate: '-45deg' }],
+            zIndex: -1,
+          }}
+        />
       </View>
     );
   }
@@ -3240,15 +3379,18 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  // Feather Icon Fallback if available
-  try {
-    return <Feather name={name as any} size={scaledSize} color={color} style={style as TextStyle} />;
-  } catch {}
-
-  // Default Fallback
+  // Safe Default Vector Fallback (avoids missing-font '?' question mark box on Android)
   return (
     <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-      <View style={{ width: stroke * 2, height: stroke * 2, borderRadius: stroke, backgroundColor: color }} />
+      <View
+        style={{
+          width: scaledSize * 0.45,
+          height: scaledSize * 0.45,
+          borderRadius: (scaledSize * 0.45) / 2,
+          borderWidth: stroke,
+          borderColor: color,
+        }}
+      />
     </View>
   );
 };

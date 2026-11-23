@@ -147,89 +147,87 @@ export const GeofencePunchScreen: React.FC = () => {
           }
         }
 
-        // 1.1 Fetch Assigned Shift for Employee & Unit from SQL Shifts / Shift Calendar
-        try {
-          const today = new Date();
-          const curMonth = today.getMonth() + 1;
-          const curYear = today.getFullYear();
-          const curDay = today.getDate();
-          const dayKey = `day${String(curDay).padStart(2, '0')}`;
+        // 1.1 Fetch Assigned Shift for Employee directly from Mobile API (/api/mobile/GetEmployeeShift/)
+        if (empCode) {
+          try {
+            const today = new Date();
+            const curMonth = today.getMonth() + 1;
+            const curYear = today.getFullYear();
+            const shiftRes = await staffApi.getEmployeeShift(empCode, curMonth, curYear);
+            console.log('[PunchShift] GetEmployeeShift res:', { success: shiftRes.success, error: shiftRes.error });
+            if (shiftRes.success && shiftRes.data) {
+              const data = shiftRes.data;
+              const shiftList: any[] = data.shifts || [];
+              const todayInfo = data.today;
 
-          let assignedShiftId: number | null = null;
-          let assignedShiftName: string = '';
-          let effectiveUnitCode: string = resolvedUnitObj?.unit_code || '';
+              // Helper to format HH:MM or HH:MM:SS to 12-hour AM/PM
+              const formatTime12h = (tStr?: string) => {
+                if (!tStr) return '';
+                const s = String(tStr).trim();
+                const m = s.match(/(\d{1,2}):(\d{2})/);
+                if (!m) return s;
+                let hh = parseInt(m[1], 10);
+                const mm = m[2];
+                const ampm = hh >= 12 ? 'PM' : 'AM';
+                hh = hh % 12 || 12;
+                return `${String(hh).padStart(2, '0')}:${mm} ${ampm}`;
+              };
 
-          console.log('[PunchShift] Syncing shift for:', { empCode, userUnitCode, effectiveUnitCode, curMonth, curYear, dayKey });
+              // Helper to calculate working hours difference
+              const calcHours = (fromStr?: string, toStr?: string) => {
+                if (!fromStr || !toStr) return null;
+                const m1 = fromStr.match(/(\d{1,2}):(\d{2})/);
+                const m2 = toStr.match(/(\d{1,2}):(\d{2})/);
+                if (!m1 || !m2) return null;
+                const min1 = parseInt(m1[1], 10) * 60 + parseInt(m1[2], 10);
+                let min2 = parseInt(m2[1], 10) * 60 + parseInt(m2[2], 10);
+                if (min2 < min1) min2 += 24 * 60; // overnight shift
+                const diffH = (min2 - min1) / 60;
+                return diffH > 0 ? `${diffH.toFixed(1)} Hrs` : null;
+              };
 
-          // A. Fetch today's shift from shift-calendar for this employee (use GET so Read-only role works cleanly)
-          if (empCode) {
-            try {
-              const calUrl = effectiveUnitCode
-                ? `/api/masters/shift-calendar/process/?unit_code=${encodeURIComponent(effectiveUnitCode)}&month=${curMonth}&year=${curYear}`
-                : `/api/masters/shift-calendar/process/?month=${curMonth}&year=${curYear}`;
-              const calRes = await apiClient.get<any>(calUrl);
-              console.log('[PunchShift] calRes:', { success: calRes.success, error: calRes.error, count: calRes.data?.results?.length });
-              if (calRes.success && calRes.data) {
-                const shiftList: any[] = calRes.data.shifts || [];
-                const rows: any[] = calRes.data.results || [];
-                const cleanEmp = empCode.trim().toUpperCase();
-                const unpaddedEmp = cleanEmp.replace(/^0+/, '');
-                const empRow = rows.find((r: any) => {
-                  const rCode = String(r.emp_code || '').trim().toUpperCase();
-                  return rCode === cleanEmp || rCode.replace(/^0+/, '') === unpaddedEmp;
-                });
-                console.log('[PunchShift] empRow:', empRow ? { emp_code: empRow.emp_code, unit_code: empRow.unit_code, todayVal: empRow.days?.[dayKey] } : null);
-                if (empRow) {
-                  if (empRow.unit_code && !effectiveUnitCode) {
-                    effectiveUnitCode = empRow.unit_code;
+              let activeShiftObj: any = null;
+
+              // Match today's shift from shift list
+              if (todayInfo && todayInfo.shift_id) {
+                const targetId = String(todayInfo.shift_id);
+                activeShiftObj = shiftList.find((s: any) => String(s.id) === targetId);
+              }
+
+              if (!activeShiftObj && shiftList.length > 0) {
+                activeShiftObj = shiftList[0];
+              }
+
+              if (activeShiftObj) {
+                const sName = activeShiftObj.shift_name || (todayInfo?.shift_name || 'General Shift');
+                setShiftType(sName);
+
+                const sFrom = activeShiftObj.shift_from || todayInfo?.shift_from;
+                const sTo = activeShiftObj.shift_to || todayInfo?.shift_to;
+
+                if (sFrom && sTo) {
+                  setInTime(`${formatTime12h(sFrom)} - ${formatTime12h(sTo)}`);
+                  const computedHours = calcHours(sFrom, sTo);
+                  if (activeShiftObj.working_hours) {
+                    setWorkingHours(`${activeShiftObj.working_hours} Hrs`);
+                  } else if (computedHours) {
+                    setWorkingHours(computedHours);
                   }
-                  if (empRow.days && empRow.days[dayKey]) {
-                    const shiftId = Number(empRow.days[dayKey]);
-                    if (shiftId > 0) assignedShiftId = shiftId;
-                    const shiftObj = shiftList.find((s: any) => Number(s.id) === shiftId);
-                    if (shiftObj && shiftObj.shift_name) {
-                      assignedShiftName = shiftObj.shift_name;
-                      setShiftType(shiftObj.shift_name);
-                      if (shiftObj.shift_from && shiftObj.shift_to) {
-                        setInTime(`${shiftObj.shift_from} - ${shiftObj.shift_to}`);
-                        if (shiftObj.working_hours) setWorkingHours(`${shiftObj.working_hours} Hrs`);
-                      }
-                    }
-                  }
+                } else if (sFrom) {
+                  setInTime(formatTime12h(sFrom));
+                }
+              } else if (todayInfo) {
+                if (todayInfo.shift_name) setShiftType(todayInfo.shift_name);
+                if (todayInfo.shift_from && todayInfo.shift_to) {
+                  setInTime(`${formatTime12h(todayInfo.shift_from)} - ${formatTime12h(todayInfo.shift_to)}`);
+                  const computedHours = calcHours(todayInfo.shift_from, todayInfo.shift_to);
+                  if (computedHours) setWorkingHours(computedHours);
                 }
               }
-            } catch (calErr) {
-              console.warn('[PunchShift] Shift calendar check error:', calErr);
             }
+          } catch (shiftErr) {
+            console.warn('[PunchShift] GetEmployeeShift error:', shiftErr);
           }
-
-          // B. Fetch master_shift for this unit to get exact shift_from / shift_to timings
-          const shiftsRes = await apiClient.get<any>(
-            effectiveUnitCode ? `/api/masters/shifts/?unit_code=${encodeURIComponent(effectiveUnitCode)}` : `/api/masters/shifts/`
-          );
-          console.log('[PunchShift] shiftsRes:', { success: shiftsRes.success, error: shiftsRes.error, data: shiftsRes.data });
-          if (shiftsRes.success && shiftsRes.data) {
-            const sList = Array.isArray(shiftsRes.data) ? shiftsRes.data : shiftsRes.data.results || [];
-            if (sList.length > 0) {
-              const matchedShift =
-                sList.find(
-                  (s: any) =>
-                    (assignedShiftId !== null && Number(s.id) === assignedShiftId) ||
-                    (assignedShiftName && s.shift_name === assignedShiftName)
-                ) || sList[0];
-              if (matchedShift.shift_name) {
-                setShiftType(matchedShift.shift_name);
-              }
-              if (matchedShift.shift_from && matchedShift.shift_to) {
-                setInTime(`${matchedShift.shift_from} - ${matchedShift.shift_to}`);
-                if (matchedShift.working_hours) setWorkingHours(`${matchedShift.working_hours} Hrs`);
-              } else if (matchedShift.shift_from) {
-                setInTime(matchedShift.shift_from);
-              }
-            }
-          }
-        } catch (sErr) {
-          console.warn('[Punch] Error fetching assigned shifts:', sErr);
         }
 
         // 1.2 Fetch Employee Master shift details (e.g. shift_type / in_time from pay_employee_master)

@@ -13,7 +13,7 @@ export const ANDROID_API_KEY = 'c_iwIXRC1zx-ejzyaazVOTWbx8mlCR9fZRdN7gBoAoc';
 // Live Render Cloud Backend
 // const DEFAULT_HOST = 'https://ihms-backend-2.onrender.com';
 const DEFAULT_HOST = 'https://payroll.coreal.in'
-
+// const DEFAULT_HOST = 'http://192.168.1.24:8000';
 class ApiConfig {
   private baseUrl: string = DEFAULT_HOST;
 
@@ -56,7 +56,9 @@ export const API_ENDPOINTS = {
   // Staff / HR / Attendance
   ATTENDANCE_LOGS: '/api/attendance/android-logs/',
   ATTENDANCE_PUNCH: '/api/attendance/android-punch/',
+  ATTENDANCE_BREAK: '/api/attendance/break-punch/',
   MOBILE_MONTH_ATTENDANCE: '/api/mobile/Getemployeemonthattendances/',
+  MOBILE_EMPLOYEE_SHIFT: '/api/mobile/GetEmployeeShift/',
   MOBILE_INOUT_TIME: '/api/mobile/GETINOUTTIME/',
   MOBILE_UNIT_COORDS: '/api/mobile/Getunit_Lattitude_Longtitude_Distance/',
   MOBILE_ATTENDANCE_DETAILS: '/api/mobile/GetAttendanceDetails/',

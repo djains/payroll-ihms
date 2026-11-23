@@ -33,10 +33,10 @@ import { CompanyAttendanceReviewScreen } from '../screens/features/superadmin/Co
 import { CompanyWorkImagesReviewScreen } from '../screens/features/superadmin/CompanyWorkImagesReviewScreen';
 
 // Common Dashboard Screens
-import { HomeScreen } from '../screens/common/HomeScreen';
 import { ProfileScreen } from '../screens/common/ProfileScreen';
 import { UnifiedDashboardScreen } from '../screens/common/UnifiedDashboardScreen';
 import { NotificationsScreen } from '../screens/common/NotificationsScreen';
+import { TermsAndConditionsScreen } from '../screens/common/TermsAndConditionsScreen';
 
 // Feature: Attendance
 import { GeofencePunchScreen } from '../screens/features/attendance/GeofencePunchScreen';
@@ -103,7 +103,8 @@ const SCREEN_COMPONENTS: Record<string, ScreenRenderer> = {
   // Common Tabs & Dashboards
   UnifiedDashboard: UnifiedDashboardScreen,
   Notifications: NotificationsScreen,
-  HomeTab: HomeScreen,
+  TermsAndConditions: TermsAndConditionsScreen,
+  HomeTab: UnifiedDashboardScreen,
   ProfileTab: ProfileScreen,
   Profile: ProfileScreen,
   AttendanceTab: MonthlyCalendarScreen,
@@ -221,6 +222,7 @@ const NavigationRouter: React.FC = () => {
   if (showSplash || isRestoring) {
     return (
       <SplashScreen
+        minDuration={600}
         onFinish={() => {
           setShowSplash(false);
           const auth = useAuthStore.getState();
@@ -237,10 +239,13 @@ const NavigationRouter: React.FC = () => {
     );
   }
 
-  // If not authenticated, ensure we show Login or ForgotPassword
+  // If not authenticated, ensure we show Login, ForgotPassword, or TermsAndConditions
   if (!isAuthenticated) {
     if (currentRoute.name === 'ForgotPassword') {
       return <ForgotPasswordScreen />;
+    }
+    if (currentRoute.name === 'TermsAndConditions') {
+      return <TermsAndConditionsScreen />;
     }
     return <LoginScreen />;
   }
