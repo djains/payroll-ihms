@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ViewStyle } from 'react-native';
+import { View, Text, TouchableOpacity, ViewStyle, Linking } from 'react-native';
 import { styles } from './AppHeader.styles';
 import { AppIcon } from './AppIcon';
 import { useNotificationStore } from '../../store/notificationStore';
@@ -69,13 +69,13 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
       <View style={styles.rightSection}>
         {showTermsIcon && (
           <TouchableOpacity
-            onPress={() => navigate('TermsAndConditions')}
+            onPress={() => Linking.openURL('https://payroll.coreal.in/login/terms-and-conditions')}
             style={styles.bellButton}
             activeOpacity={0.7}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             accessibilityLabel="Terms and Conditions"
           >
-            <AppIcon name="file-text" size={18} color={colors.textPrimary} />
+            <AppIcon name="terms-conditions" size={19} color={colors.textPrimary} />
           </TouchableOpacity>
         )}
         {showNotificationBell && (

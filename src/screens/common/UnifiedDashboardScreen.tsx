@@ -8,6 +8,7 @@ import {
   Platform,
   RefreshControl,
   Image,
+  Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './UnifiedDashboardScreen.styles';
@@ -268,6 +269,44 @@ export const UnifiedDashboardScreen: React.FC = () => {
   };
 
   /**
+   * Fetch Live Break Status from /api/attendance/break-punch/
+   */
+  const fetchLiveBreakStatus = async () => {
+    if (!empCode) return null;
+    try {
+      const targetCompCode = String(currentUser?.companyId || (currentUser as any)?.scope?.comp_code || '').trim();
+      const bRes = await staffApi.getBreakStatus(empCode, targetCompCode);
+      if (bRes.success && bRes.data && bRes.data.status === 'ok') {
+        const bd = bRes.data;
+        const isBreakActive =
+          bd.is_on_break === true ||
+          (bd.is_on_break as any) === 1 ||
+          String(bd.is_on_break).trim().toLowerCase() === 'true' ||
+          String(bd.is_on_break).trim() === '1';
+
+        const rawStart =
+          bd.current_break_start ||
+          (bd.break_start && bd.break_start.length > 0
+            ? bd.break_start[bd.break_start.length - 1]?.start_time
+            : null);
+
+        const newStatus = {
+          isOnBreak: isBreakActive,
+          currentBreakNo: bd.current_break_no ?? (bd.break_start ? bd.break_start.length : null),
+          currentBreakStart: rawStart ?? null,
+          breakStarts: bd.break_start || [],
+          breakEnds: bd.break_end || [],
+        };
+        setBreakStatus(newStatus);
+        return newStatus;
+      }
+    } catch (bErr) {
+      console.warn('[Dashboard] Failed to fetch break status:', bErr);
+    }
+    return null;
+  };
+
+  /**
    * Fetch Live Data from Real MySQL Backend APIs
    */
   const fetchDashboardData = async () => {
@@ -395,27 +434,6 @@ export const UnifiedDashboardScreen: React.FC = () => {
               resolvedUnitCode = matchedUnit.unit_code || rawUnitCode;
             }
           }
-        }
-
-        // If units API is restricted (403 for staff), resolve authentic DB unit from KNOWN_UNITS_MAP
-        const KNOWN_UNITS_MAP: Record<string, any> = {
-          u001: { unit_code: 'U001', unit_name: 'RTX5060', client_code: 'H01', unit_city: 'PUNE', state_name: 'MAHARASHTRA', region: 'MAHARASHTRA', unit_add1: 'pune' },
-          rtx5060: { unit_code: 'U001', unit_name: 'RTX5060', client_code: 'H01', unit_city: 'PUNE', state_name: 'MAHARASHTRA', region: 'MAHARASHTRA', unit_add1: 'pune' },
-          u002: { unit_code: 'U002', unit_name: 'RX590', client_code: 'H02', unit_city: 'PUNE', state_name: 'MAHARASHTRA', region: 'MAHARASHTRA', unit_add1: 'pune' },
-          rx590: { unit_code: 'U002', unit_name: 'RX590', client_code: 'H02', unit_city: 'PUNE', state_name: 'MAHARASHTRA', region: 'MAHARASHTRA', unit_add1: 'pune' },
-          u003: { unit_code: 'U003', unit_name: 'RTX5070', client_code: 'H01', unit_city: 'PUNE', state_name: 'MAHARASHTRA', region: 'MAHARASHTRA', unit_add1: 'pune' },
-          rtx5070: { unit_code: 'U003', unit_name: 'RTX5070', client_code: 'H01', unit_city: 'PUNE', state_name: 'MAHARASHTRA', region: 'MAHARASHTRA', unit_add1: 'pune' },
-          u007: { unit_code: 'U007', unit_name: 'HDFC', client_code: '7', unit_city: 'Pune', state_name: 'Assam', region: 'Assam', unit_add1: 'Viman Nagar' },
-          u008: { unit_code: 'U008', unit_name: 'It Secter', client_code: '7', unit_city: 'GUNTUR', state_name: 'ANDHRA PRADESH', region: 'ANDHRA PRADESH', unit_add1: 'pune' },
-          'ng it': { unit_code: 'NG IT', unit_name: 'It sector', client_code: 'C01', unit_city: 'Pune', state_name: 'Maharashtra', region: 'Maharashtra', unit_add1: 'Phenx mall' },
-        };
-        const uTarget = String(rawUnitCode || rawUnit || '').trim().toLowerCase();
-        if (!resolvedUnitCity && KNOWN_UNITS_MAP[uTarget]) {
-          const ku = KNOWN_UNITS_MAP[uTarget];
-          resolvedUnitName = ku.unit_name;
-          resolvedUnitCity = ku.unit_city;
-          resolvedUnitState = ku.state_name;
-          resolvedUnitCode = ku.unit_code;
         }
 
         if (resolvedComp || resolvedUnitCity || resolvedUnitState) {
@@ -813,21 +831,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
       }
 
       // 1b. Process Live Break Status from /api/attendance/break-punch/
-      try {
-        const bRes = await staffApi.getBreakStatus(empCode, targetCompCode);
-        if (bRes.success && bRes.data && bRes.data.status === 'ok') {
-          const bd = bRes.data;
-          setBreakStatus({
-            isOnBreak: Boolean(bd.is_on_break),
-            currentBreakNo: bd.current_break_no ?? null,
-            currentBreakStart: bd.current_break_start ?? null,
-            breakStarts: bd.break_start || [],
-            breakEnds: bd.break_end || [],
-          });
-        }
-      } catch (bErr) {
-        console.warn('[Dashboard] Failed to fetch break status:', bErr);
-      }
+      await fetchLiveBreakStatus();
 
       // 2. Process Salary
       if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
@@ -1149,18 +1153,54 @@ export const UnifiedDashboardScreen: React.FC = () => {
     return () => clearInterval(interval);
   }, [latestPunch]);
 
+  /**
+   * Safe parser for break/punch timestamps (handles ISO, 24h, 12h AM/PM)
+   */
+  const parseTimeToDate = (timeStr?: string | null): Date | null => {
+    if (!timeStr) return null;
+    const str = String(timeStr).trim();
+    if (!str || str === '--:--') return null;
+
+    // 1. Full date/time: e.g. "2026-11-24T18:05:22" or "2026-11-24 18:05:22"
+    if (str.includes('-') || str.includes('/')) {
+      const d = new Date(str.replace(' ', 'T'));
+      if (!isNaN(d.getTime())) return d;
+    }
+
+    // 2. Time string: "18:05:22" or "06:05:22 PM" or "6:05 PM"
+    const isPM = /pm/i.test(str);
+    const isAM = /am/i.test(str);
+    const cleanStr = str.replace(/[^\d:]/g, '');
+    const parts = cleanStr.split(':');
+    if (parts.length >= 2) {
+      let h = parseInt(parts[0], 10) || 0;
+      const m = parseInt(parts[1], 10) || 0;
+      const s = parseInt(parts[2] || '0', 10) || 0;
+      if (isPM && h < 12) h += 12;
+      if (isAM && h === 12) h = 0;
+      const d = new Date();
+      d.setHours(h, m, s, 0);
+      return d;
+    }
+    return null;
+  };
+
   // Live Break Elapsed Count Timer: Dynamically counts up every second when employee is on break
   useEffect(() => {
     let interval: any = null;
-    if (breakStatus.isOnBreak && breakStatus.currentBreakStart) {
+    if (breakStatus.isOnBreak) {
       const updateBreakTimer = () => {
         try {
-          const parts = breakStatus.currentBreakStart!.split(':');
-          if (parts.length >= 2) {
+          const startStr =
+            breakStatus.currentBreakStart ||
+            (breakStatus.breakStarts && breakStatus.breakStarts.length > 0
+              ? breakStatus.breakStarts[breakStatus.breakStarts.length - 1]?.start_time
+              : null);
+
+          const startDate = parseTimeToDate(startStr);
+          if (startDate) {
             const now = new Date();
-            const start = new Date();
-            start.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2] || '0', 10), 0);
-            let diffSec = Math.floor((now.getTime() - start.getTime()) / 1000);
+            let diffSec = Math.floor((now.getTime() - startDate.getTime()) / 1000);
             if (diffSec < 0) diffSec += 24 * 3600;
             const h = Math.floor(diffSec / 3600);
             const m = Math.floor((diffSec % 3600) / 60);
@@ -1170,6 +1210,8 @@ export const UnifiedDashboardScreen: React.FC = () => {
             } else {
               setBreakElapsedTimer(`${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`);
             }
+          } else {
+            setBreakElapsedTimer('00m 01s');
           }
         } catch {
           setBreakElapsedTimer('On Break');
@@ -1185,7 +1227,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [breakStatus.isOnBreak, breakStatus.currentBreakStart]);
+  }, [breakStatus.isOnBreak, breakStatus.currentBreakStart, breakStatus.breakStarts]);
 
   const handleBreakAction = async () => {
     if (!empCode) return;
@@ -1218,13 +1260,37 @@ export const UnifiedDashboardScreen: React.FC = () => {
               const res = await staffApi.recordBreak(empCode, targetAction, targetCompCode);
               if (res.success && res.data && res.data.status === 'ok') {
                 const bData = res.data;
-                setBreakStatus({
-                  isOnBreak: Boolean(bData.is_on_break),
-                  currentBreakNo: bData.current_break_no ?? null,
-                  currentBreakStart: bData.current_break_start ?? null,
-                  breakStarts: bData.break_start || [],
-                  breakEnds: bData.break_end || [],
-                });
+                const now = new Date();
+                const nowTimeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+
+                // Instant Optimistic State: Guarantee immediate UI render without waiting or refreshing
+                const newIsOnBreak = isStarting;
+                const newStartTime = isStarting
+                  ? (bData.current_break_start || (bData as any).start_time || (bData as any).break_start_time || (bData as any).time || nowTimeStr)
+                  : null;
+                const newBreakNo = isStarting
+                  ? (bData.current_break_no || (bData as any).break_no || ((breakStatus.currentBreakNo || 0) + 1))
+                  : null;
+
+                setBreakStatus((prev) => ({
+                  isOnBreak: newIsOnBreak,
+                  currentBreakNo: newBreakNo,
+                  currentBreakStart: newStartTime,
+                  breakStarts: Array.isArray(bData.break_start) && bData.break_start.length > 0
+                    ? bData.break_start
+                    : isStarting
+                    ? [...prev.breakStarts, { break_no: newBreakNo || 1, start_time: newStartTime || nowTimeStr }]
+                    : prev.breakStarts,
+                  breakEnds: Array.isArray(bData.break_end) && bData.break_end.length > 0
+                    ? bData.break_end
+                    : !isStarting
+                    ? [...prev.breakEnds, { break_no: prev.currentBreakNo || 1, end_time: nowTimeStr }]
+                    : prev.breakEnds,
+                }));
+
+                // Immediately sync live database status in background without blocking UI
+                fetchLiveBreakStatus().catch(() => {});
+                fetchDashboardData().catch(() => {});
 
                 setAlertConfig({
                   visible: true,
@@ -1856,12 +1922,12 @@ export const UnifiedDashboardScreen: React.FC = () => {
             {/* Terms & Conditions / Google Play Policy Icon (Left of Notifications) */}
             <TouchableOpacity
               style={styles.bellButton}
-              onPress={() => navigate('TermsAndConditions')}
+              onPress={() => Linking.openURL('https://payroll.coreal.in/login/terms-and-conditions')}
               activeOpacity={0.7}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityLabel="Terms and Conditions"
             >
-              <AppIcon name="file-text" size={18} color="#334155" />
+              <AppIcon name="terms-conditions" size={19} color="#334155" />
             </TouchableOpacity>
 
             {/* Global Notification Bell Icon (Left of Logout) */}
@@ -2090,7 +2156,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
                       adjustsFontSizeToFit
                       minimumFontScale={0.8}
                     >
-                      Started at {breakStatus.currentBreakStart || 'Recently'} • {breakElapsedTimer}
+                      Started at {breakStatus.currentBreakStart ? formatTime12h(breakStatus.currentBreakStart) : 'Recently'} • {breakElapsedTimer}
                     </Text>
                   </View>
                 </View>

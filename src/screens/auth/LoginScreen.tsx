@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, Platform, Linking } from 'react-native';
 import { styles } from './LoginScreen.styles';
 import {
   AppScreenContainer,
@@ -20,6 +20,14 @@ export const LoginScreen: React.FC = () => {
   const { login, isLoading } = useAuthStore();
   const { navigate, reset } = useNavigation();
   const { maxContentWidth, isTablet } = useResponsive();
+
+  const handleOpenUrl = async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch (err) {
+      console.warn('[LoginScreen] Error opening legal link:', url, err);
+    }
+  };
 
   const handleLogin = async () => {
     setFieldErrors({});
@@ -62,14 +70,8 @@ export const LoginScreen: React.FC = () => {
     >
       <View style={[styles.responsiveWrapper, isTablet && { maxWidth: maxContentWidth }]}>
         
-        {/* Compact App Branding */}
+        {/* Centered App Branding */}
         <View style={styles.brandingHeader}>
-          <View style={styles.logoBadge}>
-            <View style={styles.shieldOutline}>
-              <View style={styles.shieldCheck} />
-            </View>
-          </View>
-
           <Text style={styles.heroTitle}>NG GLOBAL</Text>
           <Text style={styles.heroSubtitle}>
             INTEGRATED WORKFORCE PLATFORM
@@ -132,16 +134,53 @@ export const LoginScreen: React.FC = () => {
             style={styles.signInButton}
           />
 
-          {/* Terms Agreement Note */}
-          <View style={styles.termsRow}>
-            <Text style={styles.termsNote}>By signing in, you agree to our </Text>
-            <TouchableOpacity
-              onPress={() => navigate('TermsAndConditions')}
-              activeOpacity={0.7}
-              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-            >
-              <Text style={styles.termsLink}>Terms & Conditions</Text>
-            </TouchableOpacity>
+          {/* Legal Links: Privacy Policy & Terms and Conditions */}
+          <View style={styles.legalSection}>
+            <View style={styles.legalDividerRow}>
+              <View style={styles.legalDividerLine} />
+              <Text style={styles.legalDividerLabel}>LEGAL & POLICIES</Text>
+              <View style={styles.legalDividerLine} />
+            </View>
+
+            <View style={styles.legalCardsContainer}>
+              <TouchableOpacity
+                style={styles.legalCard}
+                onPress={() => handleOpenUrl('https://payroll.coreal.in/login/privacy-policy')}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Privacy Policy"
+              >
+                <View style={styles.privacyIconBadge}>
+                  <AppIcon name="privacy-policy" size={24} color="#1D4ED8" />
+                </View>
+                <View style={styles.legalCardContent}>
+                  <Text style={styles.legalCardTitle}>Privacy Policy</Text>
+                  <Text style={styles.legalCardSubtitle}>Data protection & privacy guidelines</Text>
+                </View>
+                <View style={styles.legalArrowBadge}>
+                  <AppIcon name="arrow-right" size={15} color="#475569" />
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.legalCard}
+                onPress={() => handleOpenUrl('https://payroll.coreal.in/login/terms-and-conditions')}
+                activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Terms and Conditions"
+              >
+                <View style={styles.termsIconBadge}>
+                  <AppIcon name="terms-conditions" size={24} color="#0D9488" />
+                </View>
+                <View style={styles.legalCardContent}>
+                  <Text style={styles.legalCardTitle}>Terms & Conditions</Text>
+                  <Text style={styles.legalCardSubtitle}>Service agreement & usage rules</Text>
+                </View>
+                <View style={styles.legalArrowBadge}>
+                  <AppIcon name="arrow-right" size={15} color="#475569" />
+                </View>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </View>

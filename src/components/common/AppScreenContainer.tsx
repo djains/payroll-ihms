@@ -42,12 +42,7 @@ export const AppScreenContainer: React.FC<AppScreenContainerProps> = ({
 }) => {
   return (
     <SafeAreaView edges={edges} style={[styles.safeArea, { backgroundColor }, style]}>
-      <StatusBar
-        barStyle={barStyle}
-        {...(Platform.OS === 'android'
-          ? ({ backgroundColor, translucent: true } as any)
-          : {})}
-      />
+      <StatusBar barStyle={barStyle} />
 
       {/* Flush 100% Full-Width Global Header pinned at top */}
       {header}

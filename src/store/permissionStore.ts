@@ -33,33 +33,16 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     try {
       const status = await checkAppPermissions();
 
-      // If all permissions are already granted, don't show modal
-      if (status.allGranted) {
+      // Compulsory permissions: Location & Camera (strictly mandatory for geofenced attendance & live selfie verification)
+      const hasCompulsory = status.location && status.camera;
+
+      if (hasCompulsory) {
+        // All compulsory permissions are granted
         set({ status, isChecking: false, isModalVisible: false });
         return true;
       }
 
-      // Check if user has already seen and interacted with the permission prompt
-      if (!force) {
-        try {
-          const creds = await Keychain.getGenericPassword({
-            service: PERMISSION_PROMPT_SEEN_KEY,
-          });
-          if (creds && creds.password === 'true') {
-            set({
-              status,
-              isChecking: false,
-              isModalVisible: false,
-              hasPromptBeenSeen: true,
-            });
-            return false;
-          }
-        } catch (e) {
-          console.warn('[PermissionStore] Error reading seen flag:', e);
-        }
-      }
-
-      // Show modal for the first time after login
+      // If compulsory permissions are NOT granted, ALWAYS show modal until user grants them!
       set({
         status,
         isChecking: false,
@@ -68,7 +51,7 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
       return false;
     } catch (e) {
       console.warn('[PermissionStore] checkPermissions error:', e);
-      set({ isChecking: false, isModalVisible: false });
+      set({ isChecking: false });
       return false;
     }
   },
@@ -76,17 +59,25 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
   requestPermissions: async () => {
     try {
       const updatedStatus = await requestAppPermissions();
-      // Permanently mark as seen so it never prompts again
-      await get().markAsSeen();
-      // Automatically dismiss modal so user continues directly to their dashboard
-      set({
-        status: updatedStatus,
-        isModalVisible: false,
-      });
-      return updatedStatus.allGranted;
+      const hasCompulsory = updatedStatus.location && updatedStatus.camera;
+
+      if (hasCompulsory) {
+        await get().markAsSeen();
+        set({
+          status: updatedStatus,
+          isModalVisible: false,
+        });
+        return true;
+      } else {
+        // Compulsory permissions are still missing -> keep modal open so user can allow or open settings
+        set({
+          status: updatedStatus,
+          isModalVisible: true,
+        });
+        return false;
+      }
     } catch (e) {
       console.warn('[PermissionStore] requestPermissions error:', e);
-      set({ isModalVisible: false });
       return false;
     }
   },
@@ -114,8 +105,10 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
   },
 
   hideModal: () => {
-    // When dismissed, also mark as seen so it doesn't prompt again
-    get().markAsSeen();
-    set({ isModalVisible: false });
+    const { status } = get();
+    // Modal can only be dismissed if compulsory permissions are granted
+    if (status?.location && status?.camera) {
+      set({ isModalVisible: false });
+    }
   },
 }));

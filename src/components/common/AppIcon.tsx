@@ -625,41 +625,115 @@ export const AppIcon: React.FC<AppIconProps> = ({
   }
 
 
-  // 4. Shield Icon (Security / App Branding)
+  // 4. Shield / Security / Privacy Policy Icon
   if (
     name === 'shield' ||
     name === 'shield-check' ||
     name === 'shield-checkmark' ||
     name === 'shieldCheck' ||
-    name === 'security'
+    name === 'shield-alert' ||
+    name === 'shieldAlert' ||
+    name === 'security' ||
+    name === 'privacy' ||
+    name === 'privacy-policy'
   ) {
     const sWidth = Math.round(scaledSize * 0.78);
-    const sHeight = Math.round(scaledSize * 0.88);
+    const sHeight = Math.round(scaledSize * 0.92);
+    const topH = Math.round(sHeight * 0.58);
+    const squareSize = Math.round(sWidth * 0.707);
+    const isCheckVariant = name === 'shield-check' || name === 'shield-checkmark' || name === 'shieldCheck';
+    const isAlertVariant = name === 'shield-alert' || name === 'shieldAlert';
+    const keyCircle = Math.max(Math.round(sWidth * 0.28), 4);
+    const keySlotH = Math.max(Math.round(sHeight * 0.22), 4);
+    const keySlotW = Math.max(Math.round(stroke * 1.1), 2);
+
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-        <View
-          style={{
-            width: sWidth,
-            height: sHeight,
-            borderWidth: stroke,
-            borderColor: color,
-            borderTopLeftRadius: sWidth * 0.45,
-            borderTopRightRadius: sWidth * 0.45,
-            borderBottomLeftRadius: sWidth * 0.6,
-            borderBottomRightRadius: sWidth * 0.6,
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'transparent',
-          }}
-        >
+        <View style={{ width: sWidth, height: sHeight, alignItems: 'center', justifyContent: 'flex-start', position: 'relative' }}>
+          {/* Upper Shield Body */}
           <View
             style={{
-              width: sWidth * 0.35,
-              height: sHeight * 0.2,
+              width: sWidth,
+              height: topH,
+              borderTopWidth: stroke,
               borderLeftWidth: stroke,
+              borderRightWidth: stroke,
+              borderColor: color,
+              borderTopLeftRadius: ms(3),
+              borderTopRightRadius: ms(3),
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'transparent',
+              zIndex: 2,
+            }}
+          >
+            {isCheckVariant ? (
+              <View
+                style={{
+                  width: Math.round(sWidth * 0.44),
+                  height: Math.round(sHeight * 0.22),
+                  borderLeftWidth: stroke * 1.2,
+                  borderBottomWidth: stroke * 1.2,
+                  borderColor: color,
+                  transform: [{ rotate: '-45deg' }, { translateY: -1 }],
+                }}
+              />
+            ) : isAlertVariant ? (
+              <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+                <View
+                  style={{
+                    width: Math.max(stroke * 1.2, 2),
+                    height: Math.round(topH * 0.44),
+                    backgroundColor: color,
+                    borderRadius: 1,
+                  }}
+                />
+                <View
+                  style={{
+                    width: Math.max(stroke * 1.2, 2),
+                    height: Math.max(stroke * 1.2, 2),
+                    borderRadius: Math.max(stroke * 0.6, 1),
+                    backgroundColor: color,
+                    marginTop: ms(1.5),
+                  }}
+                />
+              </View>
+            ) : (
+              /* Security Keyhole Emblem (Standard Universal Privacy & Protection Symbol) */
+              <View style={{ alignItems: 'center', marginTop: ms(1) }}>
+                <View
+                  style={{
+                    width: keyCircle,
+                    height: keyCircle,
+                    borderRadius: keyCircle / 2,
+                    backgroundColor: color,
+                  }}
+                />
+                <View
+                  style={{
+                    width: keySlotW,
+                    height: keySlotH,
+                    backgroundColor: color,
+                    borderBottomLeftRadius: 1,
+                    borderBottomRightRadius: 1,
+                    marginTop: -ms(0.5),
+                  }}
+                />
+              </View>
+            )}
+          </View>
+
+          {/* Lower Shield Apex (Sharp Heraldic V-point) */}
+          <View
+            style={{
+              width: squareSize,
+              height: squareSize,
               borderBottomWidth: stroke,
+              borderRightWidth: stroke,
               borderColor: color,
-              transform: [{ rotate: '-45deg' }, { translateY: -sHeight * 0.05 }],
+              transform: [{ rotate: '45deg' }],
+              marginTop: -Math.round(squareSize * 0.5) + ms(0.5),
+              zIndex: 1,
             }}
           />
         </View>
@@ -1118,21 +1192,24 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  // 5. Audit / Document / File-Text / Terms / Privacy / Legal
+  // 5. Terms & Conditions / Legal / Contract / Document / File-Text
   if (
-    name === 'audit' ||
-    name === 'clipboard' ||
+    name === 'terms' ||
+    name === 'terms-conditions' ||
+    name === 'terms-and-conditions' ||
+    name === 'legal' ||
+    name === 'contract' ||
     name === 'document' ||
     name === 'document-text' ||
     name === 'file-text' ||
+    name === 'audit' ||
+    name === 'clipboard' ||
     name === 'receipt' ||
-    name === 'terms' ||
-    name === 'policy' ||
-    name === 'privacy' ||
-    name === 'legal'
+    name === 'policy'
   ) {
-    const docW = Math.round(scaledSize * 0.65);
-    const docH = Math.round(scaledSize * 0.82);
+    const docW = Math.round(scaledSize * 0.72);
+    const docH = Math.round(scaledSize * 0.88);
+    const foldSize = Math.max(Math.round(scaledSize * 0.22), 4);
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
         <View
@@ -1142,13 +1219,46 @@ export const AppIcon: React.FC<AppIconProps> = ({
             borderWidth: stroke,
             borderRadius: ms(3),
             borderColor: color,
-            padding: ms(3),
-            justifyContent: 'space-around',
+            paddingHorizontal: ms(2.5),
+            paddingVertical: ms(3),
+            justifyContent: 'space-between',
+            position: 'relative',
           }}
         >
-          <View style={{ width: '80%', height: stroke, backgroundColor: color }} />
-          <View style={{ width: '60%', height: stroke, backgroundColor: color }} />
-          <View style={{ width: '40%', height: stroke, backgroundColor: color }} />
+          {/* Top header row with folded corner flap */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <View style={{ width: '48%', height: stroke * 1.3, backgroundColor: color, borderRadius: 1 }} />
+            <View
+              style={{
+                width: foldSize,
+                height: foldSize,
+                borderLeftWidth: stroke,
+                borderBottomWidth: stroke,
+                borderColor: color,
+                marginTop: -ms(3),
+                marginRight: -ms(2.5),
+                borderBottomLeftRadius: 1,
+              }}
+            />
+          </View>
+          {/* Clause text lines */}
+          <View style={{ width: '85%', height: stroke, backgroundColor: color, borderRadius: 1 }} />
+          <View style={{ width: '92%', height: stroke, backgroundColor: color, borderRadius: 1 }} />
+          <View style={{ width: '65%', height: stroke, backgroundColor: color, borderRadius: 1 }} />
+          {/* Signature / seal row */}
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 1 }}>
+            <View style={{ width: '40%', height: stroke * 0.9, backgroundColor: color, opacity: 0.6, borderRadius: 1 }} />
+            <View
+              style={{
+                width: ms(5),
+                height: ms(3),
+                borderLeftWidth: stroke,
+                borderBottomWidth: stroke,
+                borderColor: color,
+                transform: [{ rotate: '-45deg' }],
+              }}
+            />
+          </View>
         </View>
       </View>
     );
@@ -1950,6 +2060,46 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
+  // Arrow Right / Forward Arrow
+  if (
+    name === 'arrowRight' ||
+    name === 'arrow-right' ||
+    name === 'arrow_right' ||
+    name === 'arrowForward' ||
+    name === 'arrow-forward'
+  ) {
+    const arrW = Math.round(scaledSize * 0.68);
+    const headSize = Math.round(scaledSize * 0.32);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ width: arrW, height: headSize * 2, alignItems: 'center', justifyContent: 'center', flexDirection: 'row' }}>
+          {/* Horizontal Shaft */}
+          <View
+            style={{
+              width: Math.max(arrW - headSize * 0.7, 4),
+              height: stroke,
+              backgroundColor: color,
+              marginRight: -headSize * 0.35,
+              borderRadius: stroke / 2,
+            }}
+          />
+          {/* Arrowhead */}
+          <View
+            style={{
+              width: headSize,
+              height: headSize,
+              borderTopWidth: stroke,
+              borderRightWidth: stroke,
+              borderColor: color,
+              transform: [{ rotate: '45deg' }],
+              marginRight: ms(1),
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
+
   if (name === 'rocket') {
     const rW = Math.round(scaledSize * 0.62);
     const rH = Math.round(scaledSize * 0.78);
@@ -1996,13 +2146,36 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  if (name === 'arrow-up-right' || name === 'arrowUpRight') {
-    const arrSize = Math.round(scaledSize * 0.52);
+  if (name === 'arrow-up-right' || name === 'arrowUpRight' || name === 'external-link') {
+    const boxSize = Math.round(scaledSize * 0.58);
+    const headSize = Math.round(boxSize * 0.48);
+    const diagLen = Math.round(boxSize * 0.95);
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-        <View style={{ width: arrSize, height: arrSize, position: 'relative' }}>
-          <View style={{ position: 'absolute', top: 0, right: 0, width: arrSize * 0.7, height: arrSize * 0.7, borderTopWidth: stroke, borderRightWidth: stroke, borderColor: color }} />
-          <View style={{ position: 'absolute', bottom: arrSize * 0.1, left: arrSize * 0.1, width: stroke, height: arrSize * 1.15, backgroundColor: color, transform: [{ rotate: '-45deg' }, { translateY: -arrSize * 0.1 }] }} />
+        <View style={{ width: boxSize, height: boxSize, alignItems: 'center', justifyContent: 'center' }}>
+          {/* Arrowhead in top-right */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: 0,
+              width: headSize,
+              height: headSize,
+              borderTopWidth: stroke,
+              borderRightWidth: stroke,
+              borderColor: color,
+            }}
+          />
+          {/* Diagonal Shaft */}
+          <View
+            style={{
+              position: 'absolute',
+              width: diagLen,
+              height: stroke,
+              backgroundColor: color,
+              transform: [{ rotate: '-45deg' }],
+            }}
+          />
         </View>
       </View>
     );

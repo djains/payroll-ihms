@@ -32,7 +32,6 @@ export type ScreenName =
   // Main Tabs
   | 'UnifiedDashboard'
   | 'Notifications'
-  | 'TermsAndConditions'
   | 'HomeTab'
   | 'AttendanceTab'
   | 'PunchTab'

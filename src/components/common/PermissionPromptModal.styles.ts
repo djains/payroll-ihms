@@ -1,7 +1,6 @@
 import { StyleSheet } from 'react-native';
 import { ms } from '../../theme/responsive';
-import { fontSizes } from '../../theme/typography';
-import { borderRadius, spacing, shadows } from '../../theme/spacing';
+import { shadows, spacing } from '../../theme/spacing';
 
 export const styles = StyleSheet.create({
   backdrop: {
@@ -13,30 +12,31 @@ export const styles = StyleSheet.create({
   },
   card: {
     width: '100%',
-    maxWidth: 400,
+    maxWidth: 380,
+    maxHeight: '92%',
     backgroundColor: '#FFFFFF',
     borderRadius: ms(20),
-    paddingHorizontal: ms(20),
-    paddingTop: ms(24),
-    paddingBottom: ms(20),
+    paddingHorizontal: ms(18),
+    paddingTop: ms(20),
+    paddingBottom: ms(16),
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#E2E8F0',
     ...shadows.lg,
   },
   headerIconBadge: {
-    width: ms(56),
-    height: ms(56),
-    borderRadius: ms(28),
-    backgroundColor: '#FDF1C8',
+    width: ms(50),
+    height: ms(50),
+    borderRadius: ms(25),
+    backgroundColor: '#FEF3C7',
     borderWidth: 2,
     borderColor: '#FDE68A',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: ms(10),
+    marginBottom: ms(8),
   },
   title: {
-    fontSize: ms(19),
+    fontSize: ms(18),
     fontWeight: '800',
     color: '#0F172A',
     textAlign: 'center',
@@ -47,13 +47,17 @@ export const styles = StyleSheet.create({
     fontSize: ms(11),
     color: '#64748B',
     textAlign: 'center',
-    lineHeight: ms(16),
-    marginBottom: ms(16),
-    paddingHorizontal: ms(8),
+    lineHeight: ms(15),
+    marginBottom: ms(12),
+    paddingHorizontal: ms(4),
   },
-  permissionList: {
+  scrollList: {
     width: '100%',
-    marginBottom: ms(16),
+    maxHeight: ms(260),
+    marginBottom: ms(8),
+  },
+  scrollContent: {
+    paddingBottom: ms(2),
   },
   permissionItem: {
     flexDirection: 'row',
@@ -69,10 +73,11 @@ export const styles = StyleSheet.create({
     width: ms(36),
     height: ms(36),
     borderRadius: ms(10),
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: ms(10),
-    marginTop: ms(2),
+    marginTop: ms(1),
   },
   textContainer: {
     flex: 1,
@@ -84,16 +89,18 @@ export const styles = StyleSheet.create({
     marginBottom: ms(2),
   },
   itemTitle: {
-    fontSize: ms(12.5),
+    fontSize: ms(12),
     fontWeight: '700',
-    color: '#1E293B',
+    color: '#0F172A',
+    flex: 1,
+    marginRight: ms(6),
   },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: ms(4),
-    paddingHorizontal: ms(7),
-    paddingVertical: ms(2.5),
+    gap: ms(3.5),
+    paddingHorizontal: ms(6),
+    paddingVertical: ms(2),
     borderRadius: ms(6),
   },
   statusBadgeText: {
@@ -101,19 +108,23 @@ export const styles = StyleSheet.create({
     fontWeight: '700',
   },
   itemDescription: {
-    fontSize: ms(10.5),
+    fontSize: ms(10),
     color: '#64748B',
-    lineHeight: ms(14),
+    lineHeight: ms(13.5),
+  },
+  actionsContainer: {
+    width: '100%',
+    marginTop: ms(4),
   },
   primaryButton: {
     width: '100%',
-    backgroundColor: '#111827',
+    backgroundColor: '#0F172A',
     borderRadius: ms(12),
-    minHeight: ms(48),
+    minHeight: ms(46),
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: ms(8),
+    marginBottom: ms(6),
     ...shadows.sm,
   },
   primaryButtonText: {
@@ -121,27 +132,28 @@ export const styles = StyleSheet.create({
     fontSize: ms(13),
     fontWeight: '700',
   },
-  secondaryRow: {
+  settingsButton: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: ms(16),
-    marginTop: ms(4),
+    paddingVertical: ms(8),
+    paddingHorizontal: ms(12),
+    borderRadius: ms(10),
+    backgroundColor: '#F0F9FF',
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
   },
-  textLink: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: ms(6),
-    paddingHorizontal: ms(8),
-  },
-  textLinkTitle: {
-    fontSize: ms(11.5),
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  settingsLinkTitle: {
-    fontSize: ms(11.5),
-    fontWeight: '600',
+  settingsButtonText: {
     color: '#0284C7',
+    fontSize: ms(11.5),
+    fontWeight: '600',
+  },
+  compulsoryNotice: {
+    fontSize: ms(9.5),
+    color: '#DC2626',
+    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: ms(6),
   },
 });

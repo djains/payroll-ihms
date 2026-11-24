@@ -28,20 +28,6 @@ export interface AuthState {
 }
 
 
-// Known Unit Master metadata seeded from MySQL pay_unit_master / master_unit
-// (Ensures non-admin staff users who receive 403 on /api/masters/units/ still get 100% authentic database unit details)
-const KNOWN_UNITS_MAP: Record<string, { unit_code: string; unit_name: string; client_code: string; city: string; state: string; region: string; address: string }> = {
-  u001: { unit_code: 'U001', unit_name: 'RTX5060', client_code: 'H01', city: 'PUNE', state: 'MAHARASHTRA', region: 'MAHARASHTRA', address: 'pune' },
-  rtx5060: { unit_code: 'U001', unit_name: 'RTX5060', client_code: 'H01', city: 'PUNE', state: 'MAHARASHTRA', region: 'MAHARASHTRA', address: 'pune' },
-  u002: { unit_code: 'U002', unit_name: 'RX590', client_code: 'H02', city: 'PUNE', state: 'MAHARASHTRA', region: 'MAHARASHTRA', address: 'pune' },
-  rx590: { unit_code: 'U002', unit_name: 'RX590', client_code: 'H02', city: 'PUNE', state: 'MAHARASHTRA', region: 'MAHARASHTRA', address: 'pune' },
-  u003: { unit_code: 'U003', unit_name: 'RTX5070', client_code: 'H01', city: 'PUNE', state: 'MAHARASHTRA', region: 'MAHARASHTRA', address: 'pune' },
-  rtx5070: { unit_code: 'U003', unit_name: 'RTX5070', client_code: 'H01', city: 'PUNE', state: 'MAHARASHTRA', region: 'MAHARASHTRA', address: 'pune' },
-  u007: { unit_code: 'U007', unit_name: 'HDFC', client_code: '7', city: 'Pune', state: 'Assam', region: 'Assam', address: 'Viman Nagar' },
-  u008: { unit_code: 'U008', unit_name: 'It Secter', client_code: '7', city: 'GUNTUR', state: 'ANDHRA PRADESH', region: 'ANDHRA PRADESH', address: 'pune' },
-  'ng it': { unit_code: 'NG IT', unit_name: 'It sector', client_code: 'C01', city: 'Pune', state: 'Maharashtra', region: 'Maharashtra', address: 'Phenx mall' },
-};
-
 export const useAuthStore = create<AuthState>((set, get) => ({
   currentUser: null,
   isAuthenticated: false,
@@ -240,20 +226,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                     ) || (uList.length === 1 ? uList[0] : null);
                   }
                 } catch {}
-
-                // If units API is restricted (403 for staff), resolve authentic DB unit from KNOWN_UNITS_MAP
-                if (!matchedUnit && KNOWN_UNITS_MAP[targetU]) {
-                  const k = KNOWN_UNITS_MAP[targetU];
-                  matchedUnit = {
-                    unit_code: k.unit_code,
-                    unit_name: k.unit_name,
-                    client_code: k.client_code,
-                    unit_city: k.city,
-                    state_name: k.state,
-                    region: k.region,
-                    unit_add1: k.address,
-                  };
-                }
 
                 if (matchedUnit) {
                   if (matchedUnit.unit_name) employeeUnit = matchedUnit.unit_name;
@@ -471,20 +443,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               ) || (uList.length === 1 ? uList[0] : null);
             }
           } catch {}
-
-          // If units API is restricted (403 for staff), resolve authentic DB unit from KNOWN_UNITS_MAP
-          if (!matchedUnit && KNOWN_UNITS_MAP[targetU]) {
-            const k = KNOWN_UNITS_MAP[targetU];
-            matchedUnit = {
-              unit_code: k.unit_code,
-              unit_name: k.unit_name,
-              client_code: k.client_code,
-              unit_city: k.city,
-              state_name: k.state,
-              region: k.region,
-              unit_add1: k.address,
-            };
-          }
 
           if (matchedUnit) {
             if (matchedUnit.unit_name) employeeUnit = matchedUnit.unit_name;

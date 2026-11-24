@@ -36,7 +36,6 @@ import { CompanyWorkImagesReviewScreen } from '../screens/features/superadmin/Co
 import { ProfileScreen } from '../screens/common/ProfileScreen';
 import { UnifiedDashboardScreen } from '../screens/common/UnifiedDashboardScreen';
 import { NotificationsScreen } from '../screens/common/NotificationsScreen';
-import { TermsAndConditionsScreen } from '../screens/common/TermsAndConditionsScreen';
 
 // Feature: Attendance
 import { GeofencePunchScreen } from '../screens/features/attendance/GeofencePunchScreen';
@@ -103,7 +102,6 @@ const SCREEN_COMPONENTS: Record<string, ScreenRenderer> = {
   // Common Tabs & Dashboards
   UnifiedDashboard: UnifiedDashboardScreen,
   Notifications: NotificationsScreen,
-  TermsAndConditions: TermsAndConditionsScreen,
   HomeTab: UnifiedDashboardScreen,
   ProfileTab: ProfileScreen,
   Profile: ProfileScreen,
@@ -239,13 +237,10 @@ const NavigationRouter: React.FC = () => {
     );
   }
 
-  // If not authenticated, ensure we show Login, ForgotPassword, or TermsAndConditions
+  // If not authenticated, ensure we show Login or ForgotPassword
   if (!isAuthenticated) {
     if (currentRoute.name === 'ForgotPassword') {
       return <ForgotPasswordScreen />;
-    }
-    if (currentRoute.name === 'TermsAndConditions') {
-      return <TermsAndConditionsScreen />;
     }
     return <LoginScreen />;
   }
