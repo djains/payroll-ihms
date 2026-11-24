@@ -326,7 +326,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     // Direct live authentication against Django REST Backend (connected to MySQL ihms_18_02_2026)
     try {
-      const apiRes = await authApi.login(cleanUser, cleanPass);
+      let apiRes = await authApi.login(cleanUser, cleanPass);
+      // If login failed and username had lowercase characters, fallback retry with uppercase (e.g. x00005 -> X00005)
+      if (!apiRes.success && cleanUser !== cleanUser.toUpperCase()) {
+        const retryRes = await authApi.login(cleanUser.toUpperCase(), cleanPass);
+        if (retryRes.success && retryRes.data) {
+          apiRes = retryRes;
+        }
+      }
       if (apiRes.success && apiRes.data) {
         const u = apiRes.data;
         

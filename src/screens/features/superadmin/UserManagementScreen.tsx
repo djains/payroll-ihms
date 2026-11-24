@@ -7,6 +7,8 @@ import {
   ActivityIndicator,
   Platform,
   RefreshControl,
+  Modal,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './UserManagementScreen.styles';
@@ -14,7 +16,9 @@ import {
   AppScreenContainer,
   AppIcon,
   AppTextInput,
+  AppButton,
   CustomAlertModal,
+  PasswordStrengthMeter,
 } from '../../../components/common';
 import { useNavigation } from '../../../navigation/navigationContext';
 import { superadminApi, BackendUserItem } from '../../../api';
@@ -44,6 +48,64 @@ export const UserManagementScreen: React.FC = () => {
     visible: false,
     title: '',
   });
+
+  // Admin Direct Password Reset States
+  const [selectedUserForReset, setSelectedUserForReset] = useState<BackendUserItem | null>(null);
+  const [newAdminPassword, setNewAdminPassword] = useState<string>('');
+  const [confirmAdminPassword, setConfirmAdminPassword] = useState<string>('');
+  const [resetLoading, setResetLoading] = useState<boolean>(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+
+  const handleAdminResetPassword = async () => {
+    if (!selectedUserForReset) return;
+    const cleanNew = newAdminPassword.trim();
+    const cleanConfirm = confirmAdminPassword.trim();
+
+    if (!cleanNew) {
+      setResetError('Please enter a new password.');
+      return;
+    }
+
+    if (cleanNew.length < 9) {
+      setResetError('Password must be at least 9 characters (e.g. Staff@1234).');
+      return;
+    }
+
+    if (cleanNew !== cleanConfirm) {
+      setResetError('Passwords do not match.');
+      return;
+    }
+
+    setResetLoading(true);
+    setResetError(null);
+    try {
+      const res = await superadminApi.updateUser(selectedUserForReset.id, {
+        password: cleanNew,
+        confirm_password: cleanConfirm,
+        role_name: selectedUserForReset.current_role || undefined,
+      });
+      setResetLoading(false);
+
+      if (res.success) {
+        const userObj = selectedUserForReset;
+        setSelectedUserForReset(null);
+        setNewAdminPassword('');
+        setConfirmAdminPassword('');
+        setAlertConfig({
+          visible: true,
+          title: 'Password Reset Successful',
+          message: `Password has been reset for ${userObj.username}. The employee can now log in with the new password.`,
+          type: 'success',
+        });
+      } else {
+        const err = res.error || (res.data as any)?.detail || 'Failed to reset password';
+        setResetError(typeof err === 'string' ? err : JSON.stringify(err));
+      }
+    } catch (err: any) {
+      setResetLoading(false);
+      setResetError(err?.message || 'Network error while resetting password.');
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -163,28 +225,44 @@ export const UserManagementScreen: React.FC = () => {
             </Text>
           </View>
 
-          <TouchableOpacity
-            style={[
-              styles.toggleButton,
-              item.is_active ? styles.toggleBtnDeactivate : styles.toggleBtnActivate,
-            ]}
-            onPress={() => toggleUserActiveStatus(item)}
-            disabled={isBusy}
-            activeOpacity={0.7}
-          >
-            {isBusy ? (
-              <ActivityIndicator size="small" color="#475569" />
-            ) : (
-              <Text
-                style={[
-                  styles.toggleBtnText,
-                  { color: item.is_active ? '#DC2626' : '#059669' },
-                ]}
-              >
-                {item.is_active ? 'Block User' : 'Activate User'}
-              </Text>
-            )}
-          </TouchableOpacity>
+          <View style={styles.cardActionsRight}>
+            <TouchableOpacity
+              style={styles.resetPwButton}
+              onPress={() => {
+                setSelectedUserForReset(item);
+                setNewAdminPassword('');
+                setConfirmAdminPassword('');
+                setResetError(null);
+              }}
+              activeOpacity={0.7}
+            >
+              <AppIcon name="lock" size={11} color="#4F46E5" />
+              <Text style={styles.resetPwBtnText}>Reset Pw</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.toggleButton,
+                item.is_active ? styles.toggleBtnDeactivate : styles.toggleBtnActivate,
+              ]}
+              onPress={() => toggleUserActiveStatus(item)}
+              disabled={isBusy}
+              activeOpacity={0.7}
+            >
+              {isBusy ? (
+                <ActivityIndicator size="small" color="#475569" />
+              ) : (
+                <Text
+                  style={[
+                    styles.toggleBtnText,
+                    { color: item.is_active ? '#DC2626' : '#059669' },
+                  ]}
+                >
+                  {item.is_active ? 'Block User' : 'Activate User'}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -270,6 +348,99 @@ export const UserManagementScreen: React.FC = () => {
         ]}
         onClose={() => setAlertConfig((prev) => ({ ...prev, visible: false }))}
       />
+
+      {/* Admin Reset Password Modal */}
+      <Modal
+        visible={!!selectedUserForReset}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => {
+          if (!resetLoading) setSelectedUserForReset(null);
+        }}
+      >
+        <TouchableWithoutFeedback
+          onPress={() => {
+            if (!resetLoading) setSelectedUserForReset(null);
+          }}
+        >
+          <View style={styles.modalBackdrop}>
+            <TouchableWithoutFeedback>
+              <View style={styles.modalCard}>
+                <View style={styles.modalHeader}>
+                  <View
+                    style={{
+                      width: 36,
+                      height: 36,
+                      borderRadius: 18,
+                      backgroundColor: '#EEF2FF',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <AppIcon name="lock" size={18} color="#4F46E5" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.modalTitle}>Reset User Password</Text>
+                    <Text style={styles.modalSubtitle}>
+                      Target ID: {selectedUserForReset?.username}
+                    </Text>
+                  </View>
+                </View>
+
+                {resetError && <Text style={styles.modalErrorText}>{resetError}</Text>}
+
+                <View style={{ gap: 12 }}>
+                  <AppTextInput
+                    label="New Password"
+                    placeholder="Min 9 chars (e.g. Staff@1234)"
+                    value={newAdminPassword}
+                    onChangeText={(t) => {
+                      setNewAdminPassword(t);
+                      if (resetError) setResetError(null);
+                    }}
+                    isPassword
+                    iconLeft="lock"
+                    helperText="Must be >= 9 characters"
+                  />
+                  <PasswordStrengthMeter password={newAdminPassword} minChars={9} />
+
+                  <AppTextInput
+                    label="Confirm New Password"
+                    placeholder="Re-enter new password"
+                    value={confirmAdminPassword}
+                    onChangeText={(t) => {
+                      setConfirmAdminPassword(t);
+                      if (resetError) setResetError(null);
+                    }}
+                    isPassword
+                    iconLeft="lock"
+                  />
+                </View>
+
+                <View style={styles.modalActions}>
+                  <AppButton
+                    title="Cancel"
+                    variant="secondary"
+                    onPress={() => setSelectedUserForReset(null)}
+                    disabled={resetLoading}
+                    style={{ flex: 1 }}
+                  />
+                  <AppButton
+                    title={resetLoading ? 'Resetting...' : 'Reset Password'}
+                    variant="primary"
+                    onPress={handleAdminResetPassword}
+                    loading={resetLoading}
+                    disabled={resetLoading}
+                    style={{ flex: 2 }}
+                    customColor="#4F46E5"
+                  />
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </AppScreenContainer>
   );
 };

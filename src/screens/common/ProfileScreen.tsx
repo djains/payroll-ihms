@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Image, RefreshControl, TouchableOpacity, LayoutAnimation, Platform, UIManager, Modal, TouchableWithoutFeedback } from 'react-native';
+import { View, Text, Image, RefreshControl, TouchableOpacity, LayoutAnimation, Platform, UIManager, Modal, TouchableWithoutFeedback, ScrollView, Keyboard, useWindowDimensions } from 'react-native';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './ProfileScreen.styles';
-import { AppScreenContainer, AppIcon } from '../../components/common';
+import { AppScreenContainer, AppIcon, AppTextInput, AppButton, PasswordStrengthMeter } from '../../components/common';
 import { useAuthStore } from '../../store/authStore';
 import { useTenantStore } from '../../store/tenantStore';
 import { useNavigation } from '../../navigation/navigationContext';
-import { staffApi, apiClient } from '../../api';
+import { staffApi, apiClient, authApi } from '../../api';
 import { ANDROID_API_KEY } from '../../api/config';
 import { showToast } from '../../store/toastStore';
 import { colors } from '../../theme/colors';
@@ -28,6 +28,7 @@ let cachedProfileData: {
 
 export const ProfileScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const { currentUser, logout, updateCurrentUser } = useAuthStore();
   const { currentCompany } = useTenantStore();
   const { goBack } = useNavigation();
@@ -175,7 +176,122 @@ export const ProfileScreen: React.FC = () => {
     personal: false,
     kyc: false,
     salary: false,
+    security: false,
   });
+
+  // Change Password States
+  const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      if (Platform.OS === 'android') {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      }
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      if (Platform.OS === 'android') {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      }
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const handleChangePassword = async () => {
+    setPasswordError(null);
+    const cleanOld = oldPassword.trim();
+    const cleanNew = newPassword.trim();
+    const cleanConfirm = confirmPassword.trim();
+
+    if (!cleanOld) {
+      setPasswordError('Please enter your current password.');
+      return;
+    }
+
+    if (!cleanNew) {
+      setPasswordError('Please enter a new password.');
+      return;
+    }
+
+    if (cleanNew.length < 9) {
+      setPasswordError('New password must be at least 9 characters (e.g. Staff@1234).');
+      return;
+    }
+
+    if (cleanNew === cleanOld) {
+      setPasswordError('New password cannot be the same as your current password.');
+      return;
+    }
+
+    if (cleanNew !== cleanConfirm) {
+      setPasswordError('New password and Confirm password do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const res = await authApi.changePassword(cleanOld, cleanNew);
+      setIsChangingPassword(false);
+
+      if (res.success) {
+        setIsPasswordModalVisible(false);
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+        setPasswordError(null);
+
+        showToast({
+          type: 'success',
+          title: 'Password Changed Successfully',
+          message: 'Your password has been updated. Please log in with your new password.',
+        });
+
+        // Backend terminates session on password change; log out on client
+        setTimeout(() => {
+          logout();
+        }, 1200);
+      } else {
+        let errMessage = 'Failed to change password. Please check your current password.';
+        const raw = res.error || (res.data as any)?.detail;
+        if (typeof raw === 'string') {
+          errMessage = raw;
+        } else if (Array.isArray(raw)) {
+          errMessage = raw.join(' ');
+        } else if (typeof raw === 'object' && raw !== null) {
+          errMessage = Object.values(raw).flat().join(' ');
+        }
+        setPasswordError(errMessage);
+        showToast({
+          type: 'error',
+          title: 'Password Change Failed',
+          message: errMessage,
+        });
+      }
+    } catch (err: any) {
+      setIsChangingPassword(false);
+      const msg = err?.message || 'Network error while changing password.';
+      setPasswordError(msg);
+      showToast({
+        type: 'error',
+        title: 'Error',
+        message: msg,
+      });
+    }
+  };
 
   const toggleSection = (key: string) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -650,6 +766,33 @@ export const ProfileScreen: React.FC = () => {
             </Text>
           </View>
         </View>
+
+        {/* Quick Action Buttons */}
+        <View style={styles.heroActionRow}>
+          <TouchableOpacity
+            style={styles.heroActionBtn}
+            onPress={() => setIsPhotoModalVisible(true)}
+            activeOpacity={0.75}
+          >
+            <AppIcon name="camera" size={14} color="#334155" />
+            <Text style={styles.heroActionText}>Update Photo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.heroActionBtn, styles.heroActionBtnPrimary]}
+            onPress={() => {
+              setPasswordError(null);
+              setOldPassword('');
+              setNewPassword('');
+              setConfirmPassword('');
+              setIsPasswordModalVisible(true);
+            }}
+            activeOpacity={0.75}
+          >
+            <AppIcon name="lock" size={14} color="#4F46E5" />
+            <Text style={[styles.heroActionText, styles.heroActionTextPrimary]}>Change Password</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {/* 2. ACCORDION: EMPLOYMENT & JOB PROFILE */}
@@ -1061,6 +1204,76 @@ export const ProfileScreen: React.FC = () => {
         )}
       </View>
 
+      {/* 7. ACCORDION: ACCOUNT SECURITY & PASSWORD */}
+      <View style={styles.accordionCard}>
+        <TouchableOpacity
+          style={styles.accordionHeader}
+          onPress={() => toggleSection('security')}
+          activeOpacity={0.7}
+        >
+          <View style={styles.accordionTitleLeft}>
+            <View style={[styles.iconBox, { backgroundColor: '#EEF2FF' }]}>
+              <AppIcon name="lock" size={16} color="#4F46E5" />
+            </View>
+            <View style={styles.accordionTitleCol}>
+              <Text style={styles.accordionTitle}>Account Security & Password</Text>
+              <Text style={styles.accordionSummary}>Manage your login password</Text>
+            </View>
+          </View>
+          <View style={styles.chevronBox}>
+            <AppIcon
+              name={expandedSections.security ? 'chevronUp' : 'chevronDown'}
+              size={18}
+              color="#64748B"
+            />
+          </View>
+        </TouchableOpacity>
+
+        {expandedSections.security && (
+          <View style={styles.accordionBody}>
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Username / Emp ID</Text>
+              <Text style={styles.infoValueHighlight}>{empCode}</Text>
+            </View>
+
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Account Status</Text>
+              <View style={styles.statusChipActive}>
+                <View style={styles.statusDotActive} />
+                <Text style={styles.statusChipActiveText}>Password Protected</Text>
+              </View>
+            </View>
+
+            <Text style={styles.securityNote}>
+              Keep your account secure by choosing a strong password of at least 9 characters. Do not share your login credentials with anyone.
+            </Text>
+
+            <TouchableOpacity
+              style={styles.changePasswordBtn}
+              onPress={() => {
+                setPasswordError(null);
+                setOldPassword('');
+                setNewPassword('');
+                setConfirmPassword('');
+                setIsPasswordModalVisible(true);
+              }}
+              activeOpacity={0.8}
+            >
+              <View style={styles.changePasswordBtnContent}>
+                <View style={styles.changePasswordIconCircle}>
+                  <AppIcon name="lock" size={16} color="#4F46E5" />
+                </View>
+                <View>
+                  <Text style={styles.changePasswordBtnTitle}>Change Login Password</Text>
+                  <Text style={styles.changePasswordBtnSubtitle}>Directly update your account password</Text>
+                </View>
+              </View>
+              <AppIcon name="chevronRight" size={16} color="#6366F1" />
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+
       {/* PHOTO ACTION SHEET MODAL */}
       <Modal
         visible={isPhotoModalVisible}
@@ -1130,6 +1343,172 @@ export const ProfileScreen: React.FC = () => {
                 >
                   <Text style={styles.photoCancelButtonText}>Cancel</Text>
                 </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
+
+      {/* CHANGE PASSWORD MODAL */}
+      <Modal
+        visible={isPasswordModalVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={() => {
+          if (!isChangingPassword) {
+            Keyboard.dismiss();
+            setIsPasswordModalVisible(false);
+          }
+        }}
+      >
+        <TouchableWithoutFeedback
+          onPress={() => {
+            if (!isChangingPassword) {
+              Keyboard.dismiss();
+              setIsPasswordModalVisible(false);
+            }
+          }}
+        >
+          <View
+            style={[
+              styles.passwordModalBackdrop,
+              {
+                paddingBottom:
+                  keyboardHeight > 0
+                    ? keyboardHeight + (Platform.OS === 'android' ? ms(12) : ms(16))
+                    : Math.max(insets.bottom + ms(16), ms(24)),
+              },
+            ]}
+          >
+            <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+              <View
+                style={[
+                  styles.passwordModalCard,
+                  {
+                    maxHeight: Math.min(
+                      ms(560),
+                      windowHeight - (keyboardHeight > 0 ? keyboardHeight + ms(50) : ms(100))
+                    ),
+                    borderBottomLeftRadius: keyboardHeight > 0 ? ms(24) : 0,
+                    borderBottomRightRadius: keyboardHeight > 0 ? ms(24) : 0,
+                  },
+                ]}
+              >
+                <View style={styles.photoModalHandle} />
+
+                <View style={styles.passwordModalHeader}>
+                  <View style={styles.passwordModalIconWrap}>
+                    <AppIcon name="lock" size={20} color="#4F46E5" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.photoModalTitle}>Change Password</Text>
+                    <Text style={styles.photoModalSubtitle}>
+                      Enter current password and choose a new password
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setIsPasswordModalVisible(false);
+                    }}
+                    style={styles.modalCloseBtn}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    disabled={isChangingPassword}
+                  >
+                    <AppIcon name="close" size={16} color="#64748B" />
+                  </TouchableOpacity>
+                </View>
+
+                {passwordError && (
+                  <View style={styles.passwordErrorBox}>
+                    <AppIcon name="warning" size={16} color="#DC2626" />
+                    <Text style={styles.passwordErrorText}>{passwordError}</Text>
+                  </View>
+                )}
+
+                <ScrollView
+                  bounces={false}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerStyle={{ gap: ms(12), paddingTop: ms(4), paddingBottom: ms(12) }}
+                >
+                  <AppTextInput
+                    label="Current Password"
+                    placeholder="Enter existing password"
+                    value={oldPassword}
+                    onChangeText={(t) => {
+                      setOldPassword(t);
+                      if (passwordError) setPasswordError(null);
+                    }}
+                    isPassword
+                    iconLeft="lock"
+                  />
+
+                  <View>
+                    <AppTextInput
+                      label="New Password"
+                      placeholder="Min 9 chars (e.g. Staff@1234)"
+                      value={newPassword}
+                      onChangeText={(t) => {
+                        setNewPassword(t);
+                        if (passwordError) setPasswordError(null);
+                      }}
+                      isPassword
+                      iconLeft="lock"
+                      helperText="Must be >= 9 characters"
+                    />
+                    <PasswordStrengthMeter password={newPassword} minChars={9} />
+                  </View>
+
+                  <View>
+                    <AppTextInput
+                      label="Confirm New Password"
+                      placeholder="Re-enter new password"
+                      value={confirmPassword}
+                      onChangeText={(t) => {
+                        setConfirmPassword(t);
+                        if (passwordError) setPasswordError(null);
+                      }}
+                      isPassword
+                      iconLeft="lock"
+                    />
+                    {confirmPassword.length > 0 && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: -4 }}>
+                        <AppIcon
+                          name={newPassword === confirmPassword ? 'checkmark' : 'warning'}
+                          size={12}
+                          color={newPassword === confirmPassword ? '#15803D' : '#DC2626'}
+                        />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: newPassword === confirmPassword ? '#15803D' : '#DC2626' }}>
+                          {newPassword === confirmPassword ? 'Passwords match' : 'Passwords do not match'}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.passwordModalActions}>
+                    <AppButton
+                      title="Cancel"
+                      variant="secondary"
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setIsPasswordModalVisible(false);
+                      }}
+                      disabled={isChangingPassword}
+                      style={{ flex: 1 }}
+                    />
+                    <AppButton
+                      title={isChangingPassword ? 'Updating...' : 'Update Password'}
+                      variant="primary"
+                      onPress={handleChangePassword}
+                      loading={isChangingPassword}
+                      disabled={isChangingPassword}
+                      style={{ flex: 2 }}
+                      customColor="#4F46E5"
+                    />
+                  </View>
+                </ScrollView>
               </View>
             </TouchableWithoutFeedback>
           </View>

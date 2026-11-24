@@ -36,7 +36,7 @@ class ToastManager {
     const toast: ToastConfig = {
       ...config,
       id: config.id || Math.random().toString(36).substring(7),
-      duration: config.duration || 3500,
+      duration: config.duration !== undefined ? config.duration : 2000,
     };
 
     this.currentToast = toast;

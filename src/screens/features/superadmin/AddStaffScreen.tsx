@@ -22,6 +22,7 @@ import {
   AppIcon,
   CustomAlertModal,
   DatePickerModal,
+  PasswordStrengthMeter,
 } from '../../../components/common';
 import { useNavigation } from '../../../navigation/navigationContext';
 import { superadminApi, staffApi, authApi, BackendUnit } from '../../../api';
@@ -47,7 +48,7 @@ const addWorkerSchema = z
     sendCredentialsEmail: z.boolean().default(true),
     password: z
       .string({ required_error: 'Initial password is required' })
-      .min(6, 'Password must be at least 6 characters (e.g. Staff@123)'),
+      .min(9, 'Password must be at least 9 characters (e.g. Staff@1234)'),
     selectedUnitCode: z
       .string({ required_error: 'Please select a deployment site unit' })
       .min(1, 'Please select a deployment site unit'),
@@ -490,12 +491,22 @@ export const AddStaffScreen: React.FC = () => {
         const createdCode = res.data.emp_code || res.data.login_id || codeToUse || 'Worker';
 
         // Auto-activate login password using setup token if provided
+        let pwSetupSuccess = true;
+        let pwSetupError = '';
         if (res.data.login_setup_token && finalPassword) {
           try {
-            await authApi.setupPassword(res.data.login_setup_token, finalPassword);
+            const pwRes = await authApi.setupPassword(res.data.login_setup_token, finalPassword);
+            if (!pwRes.success) {
+              pwSetupSuccess = false;
+              pwSetupError = typeof pwRes.error === 'string' ? pwRes.error : JSON.stringify(pwRes.error || '');
+              console.warn('[AddStaffScreen] Auto password setup warning:', pwRes.error);
+            }
           } catch (pwErr) {
+            pwSetupSuccess = false;
             console.warn('[AddStaffScreen] Auto password setup info:', pwErr);
           }
+        } else if (!res.data.login_setup_token) {
+          console.warn('[AddStaffScreen] Backend did not issue login_setup_token. User account might already exist.');
         }
 
         // Dual-sync worker profile photo to mobile verification table so it renders on mobile profile
@@ -528,13 +539,21 @@ export const AddStaffScreen: React.FC = () => {
         }
 
         // Clean & compact professional toast
-        showToast({
-          type: 'success',
-          title: 'Worker Registered',
-          message: sendCredentialsEmail && emailTo
-            ? `${empName.trim()} (${createdCode}) registered! Credentials email prepared for ${emailTo}.`
-            : `${empName.trim()} (${createdCode}) has been successfully added.`,
-        });
+        if (!pwSetupSuccess) {
+          showToast({
+            type: 'warning',
+            title: 'Password Setup Warning',
+            message: `${empName.trim()} created, but password could not be activated (${pwSetupError || 'Min 8 characters required'}).`,
+          });
+        } else {
+          showToast({
+            type: 'success',
+            title: 'Worker Registered',
+            message: sendCredentialsEmail && emailTo
+              ? `${empName.trim()} (${createdCode}) registered! Credentials email prepared for ${emailTo}.`
+              : `${empName.trim()} (${createdCode}) has been successfully added.`,
+          });
+        }
 
         // Navigate cleanly to Workers Directory so the app stays active and open when returning from Gmail
         replace('WorkersList');
@@ -889,7 +908,7 @@ export const AddStaffScreen: React.FC = () => {
 
               <AppTextInput
                 label="Initial Password *"
-                placeholder="e.g. Staff@123"
+                placeholder="Min 9 chars (e.g. Staff@1234)"
                 value={password}
                 onChangeText={(v) => {
                   setPassword(v);
@@ -898,8 +917,9 @@ export const AddStaffScreen: React.FC = () => {
                 isPassword
                 iconLeft="lock"
                 error={errors.password}
-                helperText="Worker login password (min 6 characters)"
+                helperText="Worker login password (min 9 characters, e.g. Staff@1234)"
               />
+              <PasswordStrengthMeter password={password} minChars={9} />
             </View>
 
             {/* 3. Site Unit & Role Assignment */}

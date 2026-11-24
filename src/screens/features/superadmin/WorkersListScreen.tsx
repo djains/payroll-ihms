@@ -974,7 +974,7 @@ NG GLOBAL Administration`,
             <View style={styles.detailsGrid}>
               <View style={styles.detailItem}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 3 }}>
-                  <AppIcon name="home" size={13} color="#0F766E" />
+                  <AppIcon name="unit" size={13} color="#0F766E" />
                   <Text style={styles.detailLabel}>Site Unit</Text>
                 </View>
                 <Text style={styles.detailVal} numberOfLines={1}>
@@ -1160,7 +1160,7 @@ NG GLOBAL Administration`,
                   activeOpacity={0.75}
                 >
                   <AppIcon
-                    name={opt.code === 'ALL' ? 'layers' : 'home'}
+                    name={opt.code === 'ALL' ? 'users' : 'unit'}
                     size={14}
                     color={isSel ? '#FFFFFF' : '#0F766E'}
                   />

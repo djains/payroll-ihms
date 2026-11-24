@@ -61,7 +61,7 @@ export const forgotPasswordSchema = z
     newPassword: z
       .string()
       .min(1, 'New password is required')
-      .min(6, 'New password must be at least 6 characters long'),
+      .min(9, 'New password must be at least 9 characters long'),
     confirmPassword: z
       .string()
       .min(1, 'Confirm password is required'),

@@ -2146,32 +2146,98 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  // 11. Home / Unit / Branch Icon (Pure vector geometry)
-  if (name === 'home' || name === 'unit' || name === 'branch') {
-    const hW = Math.round(scaledSize * 0.76);
-    const hH = Math.round(scaledSize * 0.74);
+  // 11. Home / Unit / Branch / Site Icon (Sharp Vector Geometry)
+  if (name === 'home' || name === 'unit' || name === 'branch' || name === 'site') {
+    const w = Math.round(scaledSize * 0.74);
+    const h = Math.round(scaledSize * 0.78);
+    const roofH = Math.max(4, Math.round(h * 0.4));
+    const bodyH = Math.max(5, h - roofH + 1);
+    const bodyW = Math.round(w * 0.84);
+    const doorW = Math.max(3, Math.round(bodyW * 0.36));
+    const doorH = Math.max(3, Math.round(bodyH * 0.5));
+
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-        <View style={{ width: hW, height: hH, alignItems: 'center' }}>
+        <View style={{ width: w, height: h, alignItems: 'center', justifyContent: 'flex-end' }}>
+          {/* Pitch Roof */}
           <View
             style={{
-              width: hW * 0.7,
-              height: hW * 0.7,
-              borderTopWidth: stroke,
-              borderLeftWidth: stroke,
-              borderColor: color,
-              transform: [{ rotate: '45deg' }, { translateY: ms(3) }],
+              position: 'absolute',
+              top: 0,
+              width: 0,
+              height: 0,
+              borderStyle: 'solid',
+              borderLeftWidth: Math.round(w / 2),
+              borderRightWidth: Math.round(w / 2),
+              borderBottomWidth: roofH,
+              borderLeftColor: 'transparent',
+              borderRightColor: 'transparent',
+              borderBottomColor: color,
             }}
           />
+          {/* Building Body */}
           <View
             style={{
-              width: hW * 0.76,
-              height: hH * 0.52,
+              width: bodyW,
+              height: bodyH,
               borderLeftWidth: stroke,
               borderRightWidth: stroke,
               borderBottomWidth: stroke,
               borderColor: color,
-              marginTop: -ms(2),
+              borderBottomLeftRadius: ms(1.5),
+              borderBottomRightRadius: ms(1.5),
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+            }}
+          >
+            {/* Entrance Door */}
+            <View
+              style={{
+                width: doorW,
+                height: doorH,
+                backgroundColor: color,
+                borderTopLeftRadius: ms(1.5),
+                borderTopRightRadius: ms(1.5),
+              }}
+            />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  // Info Icon (Circle with "i")
+  if (name === 'info' || name === 'info-circle') {
+    const d = Math.round(scaledSize * 0.82);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View
+          style={{
+            width: d,
+            height: d,
+            borderRadius: d / 2,
+            borderWidth: stroke,
+            borderColor: color,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingVertical: ms(2),
+          }}
+        >
+          <View
+            style={{
+              width: Math.max(2, stroke),
+              height: Math.max(2, stroke),
+              borderRadius: Math.max(2, stroke) / 2,
+              backgroundColor: color,
+              marginBottom: ms(1.5),
+            }}
+          />
+          <View
+            style={{
+              width: stroke,
+              height: Math.round(d * 0.32),
+              backgroundColor: color,
+              borderRadius: stroke / 2,
             }}
           />
         </View>
