@@ -64,6 +64,10 @@ class ApiClient {
     const base = apiConfig.getBaseUrl().replace(/\/+$/, '');
     let resolvedUri = '';
 
+    if (urlOrPath.startsWith('data:image')) {
+      return { uri: urlOrPath };
+    }
+
     if (urlOrPath.startsWith('http://') || urlOrPath.startsWith('https://')) {
       if (urlOrPath.includes('127.0.0.1') || urlOrPath.includes('localhost')) {
         const pathPart = urlOrPath.replace(/^https?:\/\/[^\/]+/, '');

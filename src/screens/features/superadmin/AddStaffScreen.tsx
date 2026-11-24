@@ -21,6 +21,7 @@ import {
   AppButton,
   AppIcon,
   CustomAlertModal,
+  DatePickerModal,
 } from '../../../components/common';
 import { useNavigation } from '../../../navigation/navigationContext';
 import { superadminApi, staffApi, authApi, BackendUnit } from '../../../api';
@@ -102,6 +103,9 @@ export const AddStaffScreen: React.FC = () => {
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [password, setPassword] = useState('');
+  const [dob, setDob] = useState('');
+  const [backendDob, setBackendDob] = useState('');
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   // Next Code & Department
   const [nextEmpCode, setNextEmpCode] = useState('');
@@ -109,6 +113,21 @@ export const AddStaffScreen: React.FC = () => {
 
   // Worker Photo for Mandatory Verification Document
   const [workerPhoto, setWorkerPhoto] = useState<{
+    uri: string;
+    name: string;
+    type: string;
+    base64?: string;
+  } | null>(null);
+
+  // Aadhaar Card Document
+  const [aadharDoc, setAadharDoc] = useState<{
+    uri: string;
+    name: string;
+    type: string;
+  } | null>(null);
+
+  // PAN Card Document
+  const [panDoc, setPanDoc] = useState<{
     uri: string;
     name: string;
     type: string;
@@ -218,14 +237,16 @@ export const AddStaffScreen: React.FC = () => {
     }
   };
 
-  const handleCaptureCamera = async () => {
+  type DocTarget = 'photo' | 'aadhar' | 'pan';
+
+  const handleCaptureCamera = async (target: DocTarget = 'photo') => {
     try {
       const hasPermission = await requestCameraPermission();
       if (!hasPermission) {
         setAlertConfig({
           visible: true,
           title: 'Permission Denied',
-          message: 'Camera permission is required to capture worker photo. Please allow it in App Settings.',
+          message: 'Camera permission is required. Please allow it in App Settings.',
           type: 'warning',
         });
         return;
@@ -235,7 +256,7 @@ export const AddStaffScreen: React.FC = () => {
         mediaType: 'photo',
         quality: 0.8,
         saveToPhotos: false,
-        includeBase64: false,
+        includeBase64: target === 'photo',
       });
 
       if (response.didCancel) return;
@@ -251,16 +272,35 @@ export const AddStaffScreen: React.FC = () => {
 
       if (response.assets && response.assets.length > 0) {
         const asset = response.assets[0];
-        setWorkerPhoto({
+        const docObj = {
           uri: asset.uri || '',
-          name: asset.fileName || `photo_${Date.now()}.jpg`,
+          name: asset.fileName || `${target}_${Date.now()}.jpg`,
           type: asset.type || 'image/jpeg',
-        });
-        showToast({
-          type: 'success',
-          title: 'Photo Captured',
-          message: 'Worker verification photo attached.',
-        });
+          base64: asset.base64,
+        };
+
+        if (target === 'photo') {
+          setWorkerPhoto(docObj);
+          showToast({
+            type: 'success',
+            title: 'Photo Captured',
+            message: 'Worker verification photo attached.',
+          });
+        } else if (target === 'aadhar') {
+          setAadharDoc(docObj);
+          showToast({
+            type: 'success',
+            title: 'Aadhaar Attached',
+            message: 'Aadhaar card document attached.',
+          });
+        } else if (target === 'pan') {
+          setPanDoc(docObj);
+          showToast({
+            type: 'success',
+            title: 'PAN Attached',
+            message: 'PAN card document attached.',
+          });
+        }
       }
     } catch (error: any) {
       console.warn('Camera launch error:', error);
@@ -272,12 +312,12 @@ export const AddStaffScreen: React.FC = () => {
     }
   };
 
-  const handlePickGallery = async () => {
+  const handlePickGallery = async (target: DocTarget = 'photo') => {
     try {
       const response = await launchImageLibrary({
         mediaType: 'photo',
         quality: 0.8,
-        includeBase64: false,
+        includeBase64: target === 'photo',
       });
 
       if (response.didCancel) return;
@@ -293,16 +333,35 @@ export const AddStaffScreen: React.FC = () => {
 
       if (response.assets && response.assets.length > 0) {
         const asset = response.assets[0];
-        setWorkerPhoto({
+        const docObj = {
           uri: asset.uri || '',
-          name: asset.fileName || `photo_${Date.now()}.jpg`,
+          name: asset.fileName || `${target}_${Date.now()}.jpg`,
           type: asset.type || 'image/jpeg',
-        });
-        showToast({
-          type: 'success',
-          title: 'Photo Selected',
-          message: 'Worker verification photo attached.',
-        });
+          base64: asset.base64,
+        };
+
+        if (target === 'photo') {
+          setWorkerPhoto(docObj);
+          showToast({
+            type: 'success',
+            title: 'Photo Selected',
+            message: 'Worker verification photo attached.',
+          });
+        } else if (target === 'aadhar') {
+          setAadharDoc(docObj);
+          showToast({
+            type: 'success',
+            title: 'Aadhaar Selected',
+            message: 'Aadhaar card document attached.',
+          });
+        } else if (target === 'pan') {
+          setPanDoc(docObj);
+          showToast({
+            type: 'success',
+            title: 'PAN Selected',
+            message: 'PAN card document attached.',
+          });
+        }
       }
     } catch (error: any) {
       console.warn('Gallery launch error:', error);
@@ -359,28 +418,42 @@ export const AddStaffScreen: React.FC = () => {
         }
       }
 
-      // 2. Stage mandatory verification documents in backend
-      if (codeToUse && workerPhoto) {
-        await Promise.allSettled([
-          staffApi.uploadEmployeeDoc(
-            codeToUse,
-            'Original Photo(Passport Size)',
-            workerPhoto.uri,
-            'photo.jpg'
-          ),
-          staffApi.uploadEmployeeDoc(
-            codeToUse,
-            'Original Aadhar Card',
-            workerPhoto.uri,
-            'aadhar.jpg'
-          ),
-          staffApi.uploadEmployeeDoc(
-            codeToUse,
-            'Pan Card',
-            workerPhoto.uri,
-            'pan.jpg'
-          ),
-        ]);
+      // 2. Stage verification documents in backend
+      if (codeToUse) {
+        const uploadPromises: Promise<any>[] = [];
+        if (workerPhoto) {
+          uploadPromises.push(
+            staffApi.uploadEmployeeDoc(
+              codeToUse,
+              'Original Photo(Passport Size)',
+              workerPhoto.uri,
+              'photo.jpg'
+            )
+          );
+        }
+        if (aadharDoc) {
+          uploadPromises.push(
+            staffApi.uploadEmployeeDoc(
+              codeToUse,
+              'Original Aadhar Card',
+              aadharDoc.uri,
+              'aadhar.jpg'
+            )
+          );
+        }
+        if (panDoc) {
+          uploadPromises.push(
+            staffApi.uploadEmployeeDoc(
+              codeToUse,
+              'Pan Card',
+              panDoc.uri,
+              'pan.jpg'
+            )
+          );
+        }
+        if (uploadPromises.length > 0) {
+          await Promise.allSettled(uploadPromises);
+        }
       }
 
       const finalPassword = password.trim() || 'Staff@123';
@@ -400,7 +473,7 @@ export const AddStaffScreen: React.FC = () => {
         employee_type: employeeType,
         reporting_to: currentUser?.empCode || currentUser?.username || '',
         gender: gender === 'Female' ? 'F' : 'M',
-        birth_date: '1995-01-01',
+        birth_date: backendDob || '1995-01-01',
         joining_date: today,
         location: selectedUnitObj?.state_name || state || 'Maharashtra',
         location_city: selectedUnitObj?.unit_city || city || 'Mumbai',
@@ -423,6 +496,13 @@ export const AddStaffScreen: React.FC = () => {
           } catch (pwErr) {
             console.warn('[AddStaffScreen] Auto password setup info:', pwErr);
           }
+        }
+
+        // Dual-sync worker profile photo to mobile verification table so it renders on mobile profile
+        if (workerPhoto?.base64 && createdCode) {
+          staffApi.uploadMobilePhoto(createdCode, workerPhoto.base64).catch((err) => {
+            console.warn('[AddStaffScreen] Mobile photo sync note:', err);
+          });
         }
 
         // Send login credentials email if requested and email provided
@@ -524,18 +604,19 @@ export const AddStaffScreen: React.FC = () => {
               </View>
             ) : null}
 
-            {/* 1. Worker Photo Verification (Optional) */}
+            {/* 1. Worker Photo & Documents Verification */}
             <View style={styles.formCard}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={styles.sectionTitle}>Verification Photo</Text>
+                <Text style={styles.sectionTitle}>Verification & KYC Documents</Text>
                 <View style={styles.optionalBadge}>
-                  <Text style={styles.optionalBadgeText}>Optional</Text>
+                  <Text style={styles.optionalBadgeText}>Web Master</Text>
                 </View>
               </View>
               <Text style={styles.sectionSubtitle}>
-                Attach worker photo for profile & identity verification (optional)
+                Attach profile photo and mandatory verification documents for Web Portal & App
               </Text>
 
+              {/* A. Worker Passport Photo */}
               <View style={styles.photoContainer}>
                 <View
                   style={[
@@ -554,10 +635,14 @@ export const AddStaffScreen: React.FC = () => {
                   )}
                 </View>
 
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#0F172A', marginBottom: 2 }}>
+                  Worker Profile Photo (Passport Size)
+                </Text>
+
                 <View style={styles.photoButtonsRow}>
                   <TouchableOpacity
                     style={styles.photoSmallBtn}
-                    onPress={handleCaptureCamera}
+                    onPress={() => handleCaptureCamera('photo')}
                     activeOpacity={0.8}
                   >
                     <AppIcon name="camera" size={14} color="#0F766E" />
@@ -566,7 +651,7 @@ export const AddStaffScreen: React.FC = () => {
 
                   <TouchableOpacity
                     style={styles.photoSmallBtn}
-                    onPress={handlePickGallery}
+                    onPress={() => handlePickGallery('photo')}
                     activeOpacity={0.8}
                   >
                     <AppIcon name="image" size={14} color="#0F766E" />
@@ -586,9 +671,107 @@ export const AddStaffScreen: React.FC = () => {
 
                 <Text style={styles.photoHelperText}>
                   {workerPhoto
-                    ? '✓ Photo attached'
-                    : 'Tap to capture worker photo or choose from gallery (optional)'}
+                    ? '✓ Profile photo attached (will be displayed on mobile profile & website)'
+                    : 'Tap to capture worker profile photo or choose from gallery'}
                 </Text>
+              </View>
+
+              {/* B. Aadhaar Card Row */}
+              <View style={styles.docRowCard}>
+                <View style={[styles.docThumbnailWrap, aadharDoc ? styles.docThumbnailWrapReady : null]}>
+                  {aadharDoc ? (
+                    <Image source={{ uri: aadharDoc.uri }} style={styles.docThumbImage} resizeMode="cover" />
+                  ) : (
+                    <AppIcon name="id-card" size={24} color="#94A3B8" />
+                  )}
+                </View>
+                <View style={styles.docInfoCol}>
+                  <View style={styles.docTitleRow}>
+                    <Text style={styles.docTitleText}>Aadhaar Card</Text>
+                    {aadharDoc ? (
+                      <Text style={{ fontSize: 11, color: '#0F766E', fontWeight: '700' }}>✓ Attached</Text>
+                    ) : null}
+                  </View>
+                  <Text style={styles.docSubtitleText}>
+                    {aadharDoc ? aadharDoc.name : 'Attach original Aadhaar Card document'}
+                  </Text>
+                  <View style={styles.docActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.docActionBtn, aadharDoc && styles.docActionBtnActive]}
+                      onPress={() => handleCaptureCamera('aadhar')}
+                      activeOpacity={0.8}
+                    >
+                      <AppIcon name="camera" size={12} color="#0F766E" />
+                      <Text style={styles.docActionBtnText}>Camera</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.docActionBtn, aadharDoc && styles.docActionBtnActive]}
+                      onPress={() => handlePickGallery('aadhar')}
+                      activeOpacity={0.8}
+                    >
+                      <AppIcon name="image" size={12} color="#0F766E" />
+                      <Text style={styles.docActionBtnText}>Gallery</Text>
+                    </TouchableOpacity>
+                    {aadharDoc ? (
+                      <TouchableOpacity
+                        style={styles.docRemoveBtn}
+                        onPress={() => setAadharDoc(null)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.docRemoveBtnText}>Remove</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
+              </View>
+
+              {/* C. PAN Card Row */}
+              <View style={styles.docRowCard}>
+                <View style={[styles.docThumbnailWrap, panDoc ? styles.docThumbnailWrapReady : null]}>
+                  {panDoc ? (
+                    <Image source={{ uri: panDoc.uri }} style={styles.docThumbImage} resizeMode="cover" />
+                  ) : (
+                    <AppIcon name="document" size={24} color="#94A3B8" />
+                  )}
+                </View>
+                <View style={styles.docInfoCol}>
+                  <View style={styles.docTitleRow}>
+                    <Text style={styles.docTitleText}>PAN Card</Text>
+                    {panDoc ? (
+                      <Text style={{ fontSize: 11, color: '#0F766E', fontWeight: '700' }}>✓ Attached</Text>
+                    ) : null}
+                  </View>
+                  <Text style={styles.docSubtitleText}>
+                    {panDoc ? panDoc.name : 'Attach original PAN Card document'}
+                  </Text>
+                  <View style={styles.docActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.docActionBtn, panDoc && styles.docActionBtnActive]}
+                      onPress={() => handleCaptureCamera('pan')}
+                      activeOpacity={0.8}
+                    >
+                      <AppIcon name="camera" size={12} color="#0F766E" />
+                      <Text style={styles.docActionBtnText}>Camera</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.docActionBtn, panDoc && styles.docActionBtnActive]}
+                      onPress={() => handlePickGallery('pan')}
+                      activeOpacity={0.8}
+                    >
+                      <AppIcon name="image" size={12} color="#0F766E" />
+                      <Text style={styles.docActionBtnText}>Gallery</Text>
+                    </TouchableOpacity>
+                    {panDoc ? (
+                      <TouchableOpacity
+                        style={styles.docRemoveBtn}
+                        onPress={() => setPanDoc(null)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.docRemoveBtnText}>Remove</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </View>
               </View>
             </View>
 
@@ -617,6 +800,22 @@ export const AddStaffScreen: React.FC = () => {
                 value={empFatherName}
                 onChangeText={setEmpFatherName}
               />
+
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <View pointerEvents="none">
+                  <AppTextInput
+                    label="Date of Birth"
+                    placeholder="Select Date of Birth (DD/MM/YYYY)"
+                    value={dob}
+                    editable={false}
+                    iconLeft="calendar"
+                    error={errors.dob}
+                  />
+                </View>
+              </TouchableOpacity>
 
               <AppTextInput
                 label="Mobile Number *"
@@ -822,6 +1021,24 @@ export const AddStaffScreen: React.FC = () => {
           },
         ]}
         onClose={() => setAlertConfig((prev) => ({ ...prev, visible: false }))}
+      />
+
+      {/* Date Picker Modal for Date of Birth Selection */}
+      <DatePickerModal
+        visible={showDatePicker}
+        title="Select Date of Birth"
+        initialDate={backendDob || '1995-01-01'}
+        maxYear={new Date().getFullYear() - 14}
+        minYear={1950}
+        onClose={() => setShowDatePicker(false)}
+        onSelect={(formatted, date) => {
+          setDob(formatted);
+          const yyyy = date.getFullYear();
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          setBackendDob(`${yyyy}-${mm}-${dd}`);
+          if (errors.dob) setErrors((prev) => ({ ...prev, dob: '' }));
+        }}
       />
     </AppScreenContainer>
   );

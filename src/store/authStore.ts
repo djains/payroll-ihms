@@ -4,6 +4,7 @@ import { showToast } from './toastStore';
 import * as Keychain from 'react-native-keychain';
 import { authApi, apiClient } from '../api';
 import { ANDROID_API_KEY } from '../api/config';
+import { useNotificationStore } from './notificationStore';
 
 export interface AuthState {
   currentUser: User | null;
@@ -51,7 +52,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   updateCurrentUser: (updates: Partial<User>) => {
     const user = get().currentUser;
     if (user) {
-      set({ currentUser: { ...user, ...updates } });
+      const newUser = { ...user, ...updates };
+      set({ currentUser: newUser });
+      // Persist to hardware keychain so updates like avatarUrl are never lost across restarts
+      Keychain.getGenericPassword()
+        .then((credentials) => {
+          if (credentials && credentials.password) {
+            try {
+              const data = JSON.parse(credentials.password);
+              data.user = newUser;
+              Keychain.setGenericPassword('ihms_auth_session', JSON.stringify(data)).catch(() => {});
+            } catch {}
+          }
+        })
+        .catch(() => {});
     }
   },
 
@@ -124,6 +138,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               let employeeUnit = u.scope?.unit_name || u.scope?.unit_code || (u.is_staff ? 'Central Administration' : 'Not Assigned');
               let employeeMobile = '';
               let employeeEmail = `${u.username.toLowerCase()}@ihmsindia.com`;
+              let employeeJoiningDate = sessionData.user.joiningDate || '';
+              let employeeAvatarUrl = sessionData.user.avatarUrl || '';
 
               if (!isCompanyAdmin) {
                 // 1. Mobile GetUserDetails
@@ -135,10 +151,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                   if (udRes.success && udRes.data) {
                     const uList = Array.isArray(udRes.data) ? udRes.data : [udRes.data];
                     const uData = uList[0];
-                    if (uData && uData.EMP_NAME && uData.EMP_NAME.trim()) {
-                      employeeName = uData.EMP_NAME.trim();
+                    if (uData) {
+                      if (uData.EMP_NAME && uData.EMP_NAME.trim()) employeeName = uData.EMP_NAME.trim();
                       if (uData.EMP_MOBILE_NO) employeeMobile = uData.EMP_MOBILE_NO;
                       if (uData.UNIT_NAME) employeeUnit = uData.UNIT_NAME;
+                      if (uData.JOINING_DATE) employeeJoiningDate = uData.JOINING_DATE;
+                      if (uData.DEPT_CODE && (String(uData.DEPT_CODE).includes('.') || String(uData.DEPT_CODE).startsWith('http'))) {
+                        const pStr = String(uData.DEPT_CODE).trim();
+                        employeeAvatarUrl = pStr.startsWith('http') ? pStr : `/media/documents/${pStr.replace(/^\/+/, '')}`;
+                      }
                     }
                   }
                 } catch {}
@@ -158,6 +179,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                       if (match.emp_mobile_no) employeeMobile = match.emp_mobile_no;
                       if (match.emp_email_id) employeeEmail = match.emp_email_id;
                       if (match.unit_name) employeeUnit = match.unit_name;
+                      if (match.joining_date) employeeJoiningDate = match.joining_date;
                       const desig = (match.designation_code || match.grade_code || '').trim();
                       if (desig) {
                         employeeDesignation = desig;
@@ -265,6 +287,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 role: userRole,
                 designation: employeeDesignation,
                 branchOrUnit: employeeUnit,
+                joiningDate: employeeJoiningDate || sessionData.user.joiningDate,
+                avatarUrl: employeeAvatarUrl || sessionData.user.avatarUrl,
                 assignedUnitLatitude: parsedUnitLat ?? sessionData.user.assignedUnitLatitude,
                 assignedUnitLongitude: parsedUnitLon ?? sessionData.user.assignedUnitLongitude,
                 backendRole: backendRoleName,
@@ -339,6 +363,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         let employeeMobile = '';
         let employeeEmail = `${u.username.toLowerCase()}@ihmsindia.com`;
         let employeeUnit = u.scope?.unit_name || u.scope?.unit_code || (u.is_staff ? 'Central Administration' : 'Not Assigned');
+        let employeeJoiningDate = '';
+        let employeeAvatarUrl = '';
 
         if (!isCompanyAdmin) {
           // 1. Mobile GetUserDetails
@@ -350,10 +376,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             if (udRes.success && udRes.data) {
               const uList = Array.isArray(udRes.data) ? udRes.data : [udRes.data];
               const uData = uList[0];
-              if (uData && uData.EMP_NAME && uData.EMP_NAME.trim()) {
-                employeeName = uData.EMP_NAME.trim();
+              if (uData) {
+                if (uData.EMP_NAME && uData.EMP_NAME.trim()) employeeName = uData.EMP_NAME.trim();
                 if (uData.EMP_MOBILE_NO) employeeMobile = uData.EMP_MOBILE_NO;
                 if (uData.UNIT_NAME) employeeUnit = uData.UNIT_NAME;
+                if (uData.JOINING_DATE) employeeJoiningDate = uData.JOINING_DATE;
+                if (uData.DEPT_CODE && (String(uData.DEPT_CODE).includes('.') || String(uData.DEPT_CODE).startsWith('http'))) {
+                  const pStr = String(uData.DEPT_CODE).trim();
+                  employeeAvatarUrl = pStr.startsWith('http') ? pStr : `/media/documents/${pStr.replace(/^\/+/, '')}`;
+                }
               }
             }
           } catch {}
@@ -373,6 +404,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 if (match.emp_mobile_no) employeeMobile = match.emp_mobile_no;
                 if (match.emp_email_id) employeeEmail = match.emp_email_id;
                 if (match.unit_name) employeeUnit = match.unit_name;
+                if (match.joining_date) employeeJoiningDate = match.joining_date;
                 const desig = (match.designation_code || match.grade_code || '').trim();
                 if (desig) {
                   employeeDesignation = desig;
@@ -487,7 +519,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           designation: employeeDesignation,
           phone: employeeMobile,
           branchOrUnit: employeeUnit,
-          avatarUrl: '',
+          joiningDate: employeeJoiningDate || undefined,
+          avatarUrl: employeeAvatarUrl || '',
           assignedUnitLatitude: parsedUnitLat,
           assignedUnitLongitude: parsedUnitLon,
           backendRole: backendRoleName,
@@ -545,6 +578,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     // Clear hardware credentials
     Keychain.resetGenericPassword().catch(() => { });
     apiClient.setSessionCookie('');
+
+    // Clear notifications so next login starts completely clean
+    useNotificationStore.getState().clearNotifications();
 
     set({
       currentUser: null,

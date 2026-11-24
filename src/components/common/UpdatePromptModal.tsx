@@ -54,7 +54,7 @@ export const UpdatePromptModal: React.FC = () => {
             <View style={styles.card}>
               {/* Play Store Rocket Badge */}
               <View style={styles.iconWrapper}>
-                <AppIcon name="arrowUp" size={30} color="#0F766E" />
+                <AppIcon name={isDownloaded ? 'check' : 'arrowUp'} size={28} color="#0F766E" />
               </View>
 
               {/* Title & Subtitle */}
@@ -72,7 +72,7 @@ export const UpdatePromptModal: React.FC = () => {
                 <Text style={styles.versionPillText}>
                   Installed: <Text style={{ color: '#64748B' }}>v{currentVer}</Text>
                 </Text>
-                <AppIcon name="chevronRight" size={12} color="#94A3B8" />
+                <AppIcon name="chevronRight" size={14} color="#94A3B8" />
                 <Text style={styles.versionPillText}>
                   Play Store: <Text style={styles.versionPillHighlight}>Build {newVerCode}</Text>
                 </Text>
@@ -82,15 +82,21 @@ export const UpdatePromptModal: React.FC = () => {
               {!isDownloading && !isDownloaded && (
                 <View style={styles.featureBox}>
                   <View style={styles.featureRow}>
-                    <AppIcon name="check" size={14} color="#10B981" />
+                    <View style={styles.featureCheckBadge}>
+                      <AppIcon name="check" size={11} color="#059669" />
+                    </View>
                     <Text style={styles.featureText}>Enhanced facial & geofence punch accuracy</Text>
                   </View>
                   <View style={styles.featureRow}>
-                    <AppIcon name="check" size={14} color="#10B981" />
+                    <View style={styles.featureCheckBadge}>
+                      <AppIcon name="check" size={11} color="#059669" />
+                    </View>
                     <Text style={styles.featureText}>Faster offline syncing & attendance reports</Text>
                   </View>
                   <View style={styles.featureRow}>
-                    <AppIcon name="check" size={14} color="#10B981" />
+                    <View style={styles.featureCheckBadge}>
+                      <AppIcon name="check" size={11} color="#059669" />
+                    </View>
                     <Text style={styles.featureText}>Critical security and stability updates</Text>
                   </View>
                 </View>
@@ -111,9 +117,12 @@ export const UpdatePromptModal: React.FC = () => {
               {/* Downloaded Ready Notice */}
               {isDownloaded && (
                 <View style={styles.restartNoticeBox}>
-                  <Text style={styles.restartNoticeText}>
-                    ✓ Download Complete! Tap restart below.
-                  </Text>
+                  <View style={styles.restartNoticeRow}>
+                    <AppIcon name="check" size={14} color="#065F46" />
+                    <Text style={styles.restartNoticeText}>
+                      Download Complete! Tap restart below.
+                    </Text>
+                  </View>
                 </View>
               )}
 

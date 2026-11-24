@@ -1855,7 +1855,21 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
-  if (name === 'chevronLeft' || name === 'chevron-left' || name === 'arrowLeft' || name === 'arrow-left') {
+  if (
+    name === 'chevronLeft' ||
+    name === 'chevron-left' ||
+    name === 'chevron_left' ||
+    name === 'chevronBack' ||
+    name === 'chevron-back' ||
+    name === 'chevron_back' ||
+    name === 'arrowLeft' ||
+    name === 'arrow-left' ||
+    name === 'arrow_left' ||
+    name === 'arrowBack' ||
+    name === 'arrow-back' ||
+    name === 'arrow_back' ||
+    name === 'back'
+  ) {
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
         <View
@@ -1868,6 +1882,116 @@ export const AppIcon: React.FC<AppIconProps> = ({
             transform: [{ rotate: '45deg' }, { translateX: scaledSize * 0.08 }],
           }}
         />
+      </View>
+    );
+  }
+
+  if (name === 'arrowUp' || name === 'arrow-up' || name === 'arrow_up' || name === 'upload') {
+    const arrH = Math.round(scaledSize * 0.65);
+    const headW = Math.round(scaledSize * 0.35);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ width: headW * 1.5, height: arrH, alignItems: 'center', justifyContent: 'center' }}>
+          {/* Arrowhead */}
+          <View
+            style={{
+              width: headW,
+              height: headW,
+              borderTopWidth: stroke,
+              borderLeftWidth: stroke,
+              borderColor: color,
+              transform: [{ rotate: '45deg' }],
+              marginTop: ms(2),
+            }}
+          />
+          {/* Shaft */}
+          <View
+            style={{
+              width: stroke,
+              height: Math.max(arrH - headW * 0.7, 4),
+              backgroundColor: color,
+              marginTop: -headW * 0.35,
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  if (name === 'arrowDown' || name === 'arrow-down' || name === 'arrow_down') {
+    const arrH = Math.round(scaledSize * 0.65);
+    const headW = Math.round(scaledSize * 0.35);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ width: headW * 1.5, height: arrH, alignItems: 'center', justifyContent: 'center' }}>
+          {/* Shaft */}
+          <View
+            style={{
+              width: stroke,
+              height: Math.max(arrH - headW * 0.7, 4),
+              backgroundColor: color,
+              marginBottom: -headW * 0.35,
+            }}
+          />
+          {/* Arrowhead */}
+          <View
+            style={{
+              width: headW,
+              height: headW,
+              borderBottomWidth: stroke,
+              borderRightWidth: stroke,
+              borderColor: color,
+              transform: [{ rotate: '45deg' }],
+              marginBottom: ms(2),
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  if (name === 'rocket') {
+    const rW = Math.round(scaledSize * 0.62);
+    const rH = Math.round(scaledSize * 0.78);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ width: rW, height: rH, alignItems: 'center', justifyContent: 'center' }}>
+          {/* Rocket Nose & Body */}
+          <View
+            style={{
+              width: rW * 0.58,
+              height: rH * 0.68,
+              borderTopLeftRadius: rW * 0.29,
+              borderTopRightRadius: rW * 0.29,
+              borderBottomLeftRadius: ms(2),
+              borderBottomRightRadius: ms(2),
+              borderWidth: stroke,
+              borderColor: color,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <View
+              style={{
+                width: rW * 0.22,
+                height: rW * 0.22,
+                borderRadius: (rW * 0.22) / 2,
+                borderWidth: stroke * 0.8,
+                borderColor: color,
+              }}
+            />
+          </View>
+          {/* Thrust / Base */}
+          <View
+            style={{
+              width: rW * 0.26,
+              height: ms(3),
+              backgroundColor: color,
+              borderRadius: 1,
+              marginTop: 1,
+            }}
+          />
+        </View>
       </View>
     );
   }
@@ -2678,11 +2802,29 @@ export const AppIcon: React.FC<AppIconProps> = ({
   }
 
   if (name === 'close' || name === 'x') {
+    const crossSize = Math.round(scaledSize * 0.52);
     return (
       <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
-        <Text style={{ fontSize: scaledSize * 0.8, color, fontWeight: '300', textAlign: 'center', lineHeight: scaledSize }}>
-          ✕
-        </Text>
+        <View style={{ width: crossSize, height: crossSize, alignItems: 'center', justifyContent: 'center' }}>
+          <View
+            style={{
+              position: 'absolute',
+              width: stroke,
+              height: crossSize,
+              backgroundColor: color,
+              transform: [{ rotate: '45deg' }],
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              width: stroke,
+              height: crossSize,
+              backgroundColor: color,
+              transform: [{ rotate: '-45deg' }],
+            }}
+          />
+        </View>
       </View>
     );
   }

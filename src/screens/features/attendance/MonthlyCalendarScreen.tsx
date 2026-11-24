@@ -6,6 +6,7 @@ import { useNavigation, useNavigationState } from '../../../navigation/navigatio
 import { DayAttendance } from '../../../types/api.types';
 import { useAuthStore } from '../../../store/authStore';
 import { staffApi, apiConfig, apiClient, API_ENDPOINTS } from '../../../api';
+import { ANDROID_API_KEY } from '../../../api/config';
 import { colors } from '../../../theme/colors';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -123,6 +124,42 @@ function parseDateTime(rawStr: string): Date | null {
   return null;
 }
 
+function parseDojDate(rawStr?: string | null): Date | null {
+  if (!rawStr) return null;
+  const s = String(rawStr).trim();
+  if (!s || s === '—' || s === '-' || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined') return null;
+
+  if (s.includes('/') || (s.includes('-') && s.split('-')[0].length <= 2)) {
+    const delimiter = s.includes('/') ? '/' : '-';
+    const datePart = s.split(' ')[0].split('T')[0];
+    const parts = datePart.split(delimiter);
+    if (parts.length >= 3) {
+      const d = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const y = parseInt(parts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && y > 1900 && m >= 0 && m <= 11 && d >= 1 && d <= 31) {
+        return new Date(y, m, d);
+      }
+    }
+  }
+
+  if (s.includes('-')) {
+    const datePart = s.split(/[ T]/)[0];
+    const parts = datePart.split('-');
+    if (parts.length >= 3 && parts[0].length === 4) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && y > 1900 && m >= 0 && m <= 11 && d >= 1 && d <= 31) {
+        return new Date(y, m, d);
+      }
+    }
+  }
+
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+}
+
 interface ApprovedSalaryRecord {
   month: number;
   year: number;
@@ -149,6 +186,7 @@ export const MonthlyCalendarScreen: React.FC = () => {
   const [selectedDay, setSelectedDay] = useState<DayAttendance | null>(null);
 
   const [approvedRecords, setApprovedRecords] = useState<ApprovedSalaryRecord[]>([]);
+  const [joiningDateStr, setJoiningDateStr] = useState<string>(currentUser?.joiningDate || '');
 
   const [policyInfo, setPolicyInfo] = useState<{
     policyName: string;
@@ -201,6 +239,27 @@ export const MonthlyCalendarScreen: React.FC = () => {
     let workingThreshold = 8.0;
     let shortThreshold = 4.0;
     let polName = 'Standard 8-Hour Shift';
+
+    // 0. Fetch authentic Date of Joining (DOJ) for accurate attendance calculation
+    let activeJoiningDate = currentUser?.joiningDate || joiningDateStr || '';
+    if (!activeJoiningDate && empCode) {
+      try {
+        const udRes = await apiClient.get<any>(
+          `/api/mobile/GetUserDetails/?userName=${encodeURIComponent(empCode)}`,
+          { 'X-API-Key': ANDROID_API_KEY }
+        );
+        if (udRes.success && udRes.data) {
+          const uList = Array.isArray(udRes.data) ? udRes.data : [udRes.data];
+          if (uList[0]?.JOINING_DATE) {
+            activeJoiningDate = uList[0].JOINING_DATE;
+            setJoiningDateStr(activeJoiningDate);
+            useAuthStore.getState().updateCurrentUser({ joiningDate: activeJoiningDate });
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch GetUserDetails DOJ:', err);
+      }
+    }
 
     // 1. Fetch live policy thresholds from SQL (attendance_policy)
     try {
@@ -415,6 +474,9 @@ export const MonthlyCalendarScreen: React.FC = () => {
     const approvedPresent = matchedApproved ? Number(matchedApproved.tot_days_present) : null;
     const approvedHolidays = matchedApproved ? Number(matchedApproved.holidays || 0) : 0;
 
+    const dojDate = parseDojDate(activeJoiningDate);
+    const dojMidnight = dojDate ? new Date(dojDate.getFullYear(), dojDate.getMonth(), dojDate.getDate(), 0, 0, 0).getTime() : null;
+
     for (let i = 1; i <= daysInMonth; i++) {
       const d = new Date(selectedYear, selectedMonth, i);
       const isSunday = d.getDay() === 0;
@@ -431,6 +493,9 @@ export const MonthlyCalendarScreen: React.FC = () => {
       const group = dayPunches[dateStr];
       const gazettedName = sqlHolidays[dateStr] || undefined;
 
+      const currentDayMid = new Date(selectedYear, selectedMonth, i, 12, 0, 0).getTime();
+      const isBeforeJoining = dojMidnight ? currentDayMid < dojMidnight : false;
+
       let status: 'PRESENT' | 'HALF_DAY' | 'ABSENT' | 'LEAVE' | 'WEEKLY_OFF' | 'HOLIDAY' | 'UPCOMING' = 'ABSENT';
       let inTime: string | undefined = undefined;
       let outTime: string | undefined = undefined;
@@ -441,7 +506,14 @@ export const MonthlyCalendarScreen: React.FC = () => {
       let address: string | undefined = undefined;
       let holidayName: string | undefined = gazettedName;
 
-      if (group && (group.inTimes.length > 0 || group.outTimes.length > 0)) {
+      if (isBeforeJoining) {
+        // STRICT RULE: Days before employee's Date of Joining (DOJ) must NEVER be marked as ABSENT!
+        status = 'UPCOMING';
+        inTime = '—';
+        outTime = '—';
+        totalHours = 'Before Joining';
+        holidayName = undefined;
+      } else if (group && (group.inTimes.length > 0 || group.outTimes.length > 0)) {
         let dtIn: Date | null = null;
         let dtOut: Date | null = null;
 
@@ -618,7 +690,11 @@ export const MonthlyCalendarScreen: React.FC = () => {
         distance,
         address,
         holidayName,
-        shiftName: holidayName ? `${holidayName} (Holiday)` : 'General Shift',
+        shiftName: isBeforeJoining
+          ? 'Not Joined Yet'
+          : holidayName
+          ? `${holidayName} (Holiday)`
+          : 'General Shift',
       });
     }
 
@@ -638,7 +714,7 @@ export const MonthlyCalendarScreen: React.FC = () => {
       const foundToday = calculatedDays.find((d) => d.date === TODAY_DATE_STR);
       return foundToday || (calculatedDays.length > 0 ? calculatedDays[calculatedDays.length - 1] : null);
     });
-  }, [selectedYear, selectedMonth, empCode, unitCode]);
+  }, [selectedYear, selectedMonth, empCode, unitCode, joiningDateStr, currentUser?.joiningDate]);
 
   useEffect(() => {
     fetchLiveAttendance();
@@ -653,10 +729,25 @@ export const MonthlyCalendarScreen: React.FC = () => {
     setSelectedDay(day);
   };
 
+  // Date of Joining (DOJ) based attendance calculation
+  const dojDate = parseDojDate(joiningDateStr || currentUser?.joiningDate);
+  const isJoiningMonth = Boolean(dojDate && dojDate.getFullYear() === selectedYear && dojDate.getMonth() === selectedMonth);
+  const isPriorMonth = Boolean(dojDate && (
+    selectedYear < dojDate.getFullYear() ||
+    (selectedYear === dojDate.getFullYear() && selectedMonth < dojDate.getMonth())
+  ));
+
+  const effectiveDaysInMonth = isPriorMonth
+    ? 0
+    : isJoiningMonth && dojDate
+    ? Math.max(1, daysInMonth - dojDate.getDate() + 1)
+    : daysInMonth;
+
   // Metrics computation for selected month:
   // Strictly count only days that have arrived (isPast or isToday) to prevent false advance attendance!
   const fullPresentCount = days.filter((d) => d.status === 'PRESENT').length;
   const halfDayCount = days.filter((d) => d.status === 'HALF_DAY').length;
+  // absentCount automatically excludes days before DOJ because they have status === 'UPCOMING' and totalHours === 'Before Joining'
   const absentCount = days.filter((d) => d.status === 'ABSENT').length;
   // Reached paid leaves (only count towards accumulated attendance if the date has arrived <= TODAY)
   const leaveCount = days.filter((d) => {
@@ -689,8 +780,10 @@ export const MonthlyCalendarScreen: React.FC = () => {
 
   // Total Payable Present Days = Full Present + (0.5 * Half Day) + Weekly Offs + Paid Holidays + Paid Leaves
   const totalPayablePresent = fullPresentCount + 0.5 * halfDayCount + weeklyOffCount + holidayCount + leaveCount;
-  const attendanceRatioText = `${totalPayablePresent} / ${daysInMonth}`;
-  const compliancePercent = Math.min(100, Math.round((totalPayablePresent / daysInMonth) * 100));
+  const attendanceRatioText = isPriorMonth ? `0 / ${daysInMonth}` : `${totalPayablePresent} / ${daysInMonth}`;
+  const compliancePercent = effectiveDaysInMonth > 0
+    ? Math.min(100, Math.round((totalPayablePresent / effectiveDaysInMonth) * 100))
+    : 0;
 
   // Compute total actual worked hours (strictly from arrived working days where employee was physically present)
   const totalWorkedHours = days.reduce((sum, d) => {
@@ -813,7 +906,9 @@ export const MonthlyCalendarScreen: React.FC = () => {
             Physical Worked: {fullPresentCount + 0.5 * halfDayCount} Days
           </Text>
           <Text style={styles.ratioFooterText}>
-            Total Worked: {totalWorkedHours.toFixed(1)} hrs
+            {isJoiningMonth
+              ? `Joined: ${joiningDateStr || currentUser?.joiningDate || '—'} • Active: ${effectiveDaysInMonth}d`
+              : `Total Worked: ${totalWorkedHours.toFixed(1)} hrs`}
           </Text>
         </View>
       </View>
@@ -975,14 +1070,18 @@ export const MonthlyCalendarScreen: React.FC = () => {
                 styles.statusBadge,
                 {
                   backgroundColor:
-                    selectedDay.status === 'UPCOMING' && selectedDay.holidayName
+                    selectedDay.totalHours === 'Before Joining'
+                      ? '#64748B'
+                      : selectedDay.status === 'UPCOMING' && selectedDay.holidayName
                       ? '#0D9488'
                       : STATUS_COLORS[selectedDay.status] || colors.primary,
                 },
               ]}
             >
               <Text style={styles.statusBadgeText}>
-                {selectedDay.status === 'HOLIDAY'
+                {selectedDay.totalHours === 'Before Joining'
+                  ? 'BEFORE JOINING'
+                  : selectedDay.status === 'HOLIDAY'
                   ? 'PAID HOLIDAY (PH)'
                   : selectedDay.status === 'UPCOMING' && selectedDay.holidayName
                   ? 'UPCOMING HOLIDAY'
@@ -1002,7 +1101,9 @@ export const MonthlyCalendarScreen: React.FC = () => {
                   styles.detailBoxValue,
                   {
                     color:
-                      selectedDay.status === 'HOLIDAY'
+                      selectedDay.totalHours === 'Before Joining'
+                        ? colors.textSecondary
+                        : selectedDay.status === 'HOLIDAY'
                         ? STATUS_COLORS.HOLIDAY
                         : STATUS_COLORS.PRESENT,
                   },
@@ -1017,7 +1118,14 @@ export const MonthlyCalendarScreen: React.FC = () => {
               <Text
                 style={[
                   styles.detailBoxValue,
-                  { color: selectedDay.outTime && selectedDay.outTime !== 'No Punch' ? '#2563EB' : colors.textSecondary },
+                  {
+                    color:
+                      selectedDay.totalHours === 'Before Joining'
+                        ? colors.textSecondary
+                        : selectedDay.outTime && selectedDay.outTime !== 'No Punch'
+                        ? '#2563EB'
+                        : colors.textSecondary,
+                  },
                 ]}
               >
                 {selectedDay.outTime || 'No Punch'}
@@ -1026,7 +1134,12 @@ export const MonthlyCalendarScreen: React.FC = () => {
 
             <View style={styles.detailBox}>
               <Text style={styles.detailBoxLabel}>TOTAL HOURS</Text>
-              <Text style={[styles.detailBoxValue, { color: colors.textPrimary }]}>
+              <Text
+                style={[
+                  styles.detailBoxValue,
+                  { color: selectedDay.totalHours === 'Before Joining' ? colors.textSecondary : colors.textPrimary },
+                ]}
+              >
                 {selectedDay.totalHours || '0.0 hrs'}
               </Text>
             </View>
@@ -1035,7 +1148,9 @@ export const MonthlyCalendarScreen: React.FC = () => {
           {/* Clean Status Note */}
           <View style={styles.statusNoteCard}>
             <Text style={styles.statusNoteText}>
-              {selectedDay.status === 'HOLIDAY'
+              {selectedDay.totalHours === 'Before Joining'
+                ? 'ℹ️ Pre-employment Period (Before Date of Joining)'
+                : selectedDay.status === 'HOLIDAY'
                 ? `🎉 ${selectedDay.holidayName || 'Gazetted Government Holiday'} • 100% Paid Shift Credit`
                 : selectedDay.status === 'UPCOMING' && selectedDay.holidayName
                 ? `📅 Upcoming Gazetted Holiday: ${selectedDay.holidayName} • Will be credited on that date`

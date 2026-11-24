@@ -6,6 +6,7 @@ import {
   AppTextInput,
   AppButton,
   AppIcon,
+  DatePickerModal,
 } from '../../components/common';
 import { showToast } from '../../store/toastStore';
 import { authApi } from '../../api';
@@ -17,6 +18,7 @@ export const ForgotPasswordScreen: React.FC = () => {
   const [dob, setDob] = useState('');
   const [aadhaar, setAadhaar] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   // Verified record state
@@ -224,21 +226,22 @@ export const ForgotPasswordScreen: React.FC = () => {
                 containerStyle={styles.inputItem}
               />
 
-              <AppTextInput
-                label="Date of Birth"
-                placeholder="DD/MM/YYYY (e.g. 15/08/1995)"
-                value={dob}
-                onChangeText={(val) => {
-                  setDob(val);
-                  if (fieldErrors.dob) {
-                    setFieldErrors((prev) => ({ ...prev, dob: '' }));
-                  }
-                }}
-                iconLeft="calendar"
-                keyboardType="numbers-and-punctuation"
-                error={fieldErrors.dob}
-                containerStyle={styles.inputItem}
-              />
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <View pointerEvents="none">
+                  <AppTextInput
+                    label="Date of Birth"
+                    placeholder="Select Date of Birth (DD/MM/YYYY)"
+                    value={dob}
+                    editable={false}
+                    iconLeft="calendar"
+                    error={fieldErrors.dob}
+                    containerStyle={styles.inputItem}
+                  />
+                </View>
+              </TouchableOpacity>
 
               <AppTextInput
                 label="Aadhaar Card Number"
@@ -275,9 +278,19 @@ export const ForgotPasswordScreen: React.FC = () => {
           )}
         </View>
 
-        <Text style={styles.footerNote}>
-          NG GLOBAL v2.0 • Secured with Hardware Device Binding
-        </Text>
+        {/* Date Picker Modal for Date of Birth Selection */}
+        <DatePickerModal
+          visible={showDatePicker}
+          title="Select Date of Birth"
+          initialDate={dob}
+          onClose={() => setShowDatePicker(false)}
+          onSelect={(formatted) => {
+            setDob(formatted);
+            if (fieldErrors.dob) {
+              setFieldErrors((prev) => ({ ...prev, dob: '' }));
+            }
+          }}
+        />
       </View>
     </AppScreenContainer>
   );

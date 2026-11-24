@@ -88,6 +88,16 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  featureCheckBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   featureText: {
     fontSize: fontSizes.xs,
     color: '#475569',
@@ -126,6 +136,13 @@ export const styles = StyleSheet.create({
     padding: spacing.sm,
     marginBottom: spacing.md,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  restartNoticeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
   },
   restartNoticeText: {
     fontSize: fontSizes.xs,

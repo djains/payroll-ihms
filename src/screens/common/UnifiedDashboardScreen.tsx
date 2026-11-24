@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Platform,
   RefreshControl,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './UnifiedDashboardScreen.styles';
@@ -57,6 +58,42 @@ interface FeatureCardConfig {
   targetScreen: ScreenName;
   requiredMenus?: string[];
   isAvailable?: (hasAccess: (menu: string) => boolean, userRole: string) => boolean;
+}
+
+function parseDojDate(rawStr?: string | null): Date | null {
+  if (!rawStr) return null;
+  const s = String(rawStr).trim();
+  if (!s || s === '—' || s === '-' || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined') return null;
+
+  if (s.includes('/') || (s.includes('-') && s.split('-')[0].length <= 2)) {
+    const delimiter = s.includes('/') ? '/' : '-';
+    const datePart = s.split(' ')[0].split('T')[0];
+    const parts = datePart.split(delimiter);
+    if (parts.length >= 3) {
+      const d = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const y = parseInt(parts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && y > 1900 && m >= 0 && m <= 11 && d >= 1 && d <= 31) {
+        return new Date(y, m, d);
+      }
+    }
+  }
+
+  if (s.includes('-')) {
+    const datePart = s.split(/[ T]/)[0];
+    const parts = datePart.split('-');
+    if (parts.length >= 3 && parts[0].length === 4) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      const d = parseInt(parts[2], 10);
+      if (!isNaN(d) && !isNaN(m) && !isNaN(y) && y > 1900 && m >= 0 && m <= 11 && d >= 1 && d <= 31) {
+        return new Date(y, m, d);
+      }
+    }
+  }
+
+  const parsed = new Date(s);
+  return isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
 export const UnifiedDashboardScreen: React.FC = () => {
@@ -463,6 +500,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
       let newKyc = kycStatus;
       let newPettyCount = pettyCashCount;
       let newGuardsCount = deployedGuardsCount;
+      let liveJoiningDate: string = currentUser?.joiningDate || '';
 
       // 0. Process Profile User Details from MySQL GetUserDetails
       try {
@@ -478,6 +516,19 @@ export const UnifiedDashboardScreen: React.FC = () => {
             setProfileName(resolvedName);
             if (!isCompanyAdmin && currentUser && currentUser.name !== resolvedName) {
               useAuthStore.getState().updateCurrentUser({ name: resolvedName });
+            }
+          }
+          if (item?.JOINING_DATE) {
+            liveJoiningDate = item.JOINING_DATE;
+            if (currentUser && currentUser.joiningDate !== item.JOINING_DATE) {
+              useAuthStore.getState().updateCurrentUser({ joiningDate: item.JOINING_DATE });
+            }
+          }
+          if (item?.DEPT_CODE && (String(item.DEPT_CODE).includes('.') || String(item.DEPT_CODE).startsWith('http'))) {
+            const pStr = String(item.DEPT_CODE).trim();
+            const avatarUri = pStr.startsWith('http') ? pStr : `/media/documents/${pStr.replace(/^\/+/, '')}`;
+            if (currentUser && currentUser.avatarUrl !== avatarUri) {
+              useAuthStore.getState().updateCurrentUser({ avatarUrl: avatarUri });
             }
           }
 
@@ -608,10 +659,18 @@ export const UnifiedDashboardScreen: React.FC = () => {
             }
           } catch {}
 
+          const activeDoj = liveJoiningDate || currentUser?.joiningDate || '';
+          const dojDate = parseDojDate(activeDoj);
+          const dojMidnight = dojDate ? new Date(dojDate.getFullYear(), dojDate.getMonth(), dojDate.getDate(), 0, 0, 0).getTime() : null;
+
           const punchedDates = new Set<string>();
           let totalPresentCredits = 0;
 
           Object.entries(dayPunches).forEach(([dateStr, group]) => {
+            if (dojMidnight) {
+              const pD = new Date(dateStr + 'T00:00:00').getTime();
+              if (!isNaN(pD) && pD < dojMidnight) return;
+            }
             punchedDates.add(dateStr);
             const isLogToday = dateStr === todayDateStr;
 
@@ -646,7 +705,11 @@ export const UnifiedDashboardScreen: React.FC = () => {
 
           // 1. Add elapsed Sundays (Weekly Off) up to today that were not already punched as overtime
           for (let d = 1; d <= todayDate; d++) {
-            const checkDate = new Date(currentYear, currentMonth, d);
+            const checkDate = new Date(currentYear, currentMonth, d, 12, 0, 0);
+            if (dojMidnight && checkDate.getTime() < dojMidnight) {
+              // Before joining date: DO NOT credit Sunday weekly off!
+              continue;
+            }
             const isSunday = checkDate.getDay() === 0;
             const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
             if (isSunday && !punchedDates.has(dateStr)) {
@@ -678,6 +741,11 @@ export const UnifiedDashboardScreen: React.FC = () => {
                     }
                   }
                   if (hYr === currentYear && hMon === currentMonth && hDay <= todayDate) {
+                    const hCheckDate = new Date(currentYear, currentMonth, hDay, 12, 0, 0);
+                    if (dojMidnight && hCheckDate.getTime() < dojMidnight) {
+                      // Before joining date: DO NOT credit holiday!
+                      return;
+                    }
                     const hKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(hDay).padStart(2, '0')}`;
                     const isSun = new Date(currentYear, currentMonth, hDay).getDay() === 0;
                     if (!punchedDates.has(hKey) && !isSun && !countedExtraDates.has(hKey)) {
@@ -711,6 +779,11 @@ export const UnifiedDashboardScreen: React.FC = () => {
                 const lMon = dt.getMonth();
                 const lDay = dt.getDate();
                 if (lYr === currentYear && lMon === currentMonth && lDay <= todayDate) {
+                  const lCheckDate = new Date(currentYear, currentMonth, lDay, 12, 0, 0);
+                  if (dojMidnight && lCheckDate.getTime() < dojMidnight) {
+                    // Before joining date: DO NOT credit leave!
+                    return;
+                  }
                   const lKey = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(lDay).padStart(2, '0')}`;
                   const isSun = dt.getDay() === 0;
                   if (!punchedDates.has(lKey) && !isSun && !countedExtraDates.has(lKey)) {
@@ -722,9 +795,16 @@ export const UnifiedDashboardScreen: React.FC = () => {
             });
           }
 
-          newAttCount = totalPayableDays;
-          setAttendanceCount(totalPayableDays);
-          setAttendanceRatio(`${totalPayableDays}/${daysInMonth}`);
+          const isPriorToJoining = Boolean(dojMidnight && now.getTime() < dojMidnight);
+          if (isPriorToJoining) {
+            newAttCount = 0;
+            setAttendanceCount(0);
+            setAttendanceRatio(`0/${daysInMonth}`);
+          } else {
+            newAttCount = totalPayableDays;
+            setAttendanceCount(totalPayableDays);
+            setAttendanceRatio(`${totalPayableDays}/${daysInMonth}`);
+          }
 
           const currentPunch = evaluateCurrentShiftPunch(logs, now);
           newLatestPunch = currentPunch;
@@ -1752,10 +1832,18 @@ export const UnifiedDashboardScreen: React.FC = () => {
                 : 'View Profile'
             }
           >
-            <View style={[styles.avatarCircle, { backgroundColor: brandColor }]}>
-              <Text style={styles.avatarInitials}>
-                {employeeName.substring(0, 2).toUpperCase()}
-              </Text>
+            <View style={[styles.avatarCircle, { backgroundColor: brandColor, overflow: 'hidden' }]}>
+              {currentUser?.avatarUrl ? (
+                <Image
+                  source={{ uri: currentUser.avatarUrl }}
+                  style={{ width: '100%', height: '100%' }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <Text style={styles.avatarInitials}>
+                  {employeeName.substring(0, 2).toUpperCase()}
+                </Text>
+              )}
             </View>
             <View style={styles.headerTextWrap}>
               <Text style={styles.greetingTitle} numberOfLines={1}>

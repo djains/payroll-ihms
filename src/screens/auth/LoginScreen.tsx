@@ -144,22 +144,6 @@ export const LoginScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
         </View>
-
-        {/* Direct Legal & Privacy Policy Modal Link */}
-        <TouchableOpacity
-          style={styles.legalBadge}
-          onPress={() => navigate('TermsAndConditions')}
-          activeOpacity={0.7}
-          accessibilityRole="button"
-          accessibilityLabel="Open Terms and Conditions and Privacy Policy"
-        >
-          <AppIcon name="document" size={14} color="#4B5563" />
-          <Text style={styles.legalBadgeText}>Terms & Conditions • Privacy Policy</Text>
-        </TouchableOpacity>
-
-        <Text style={styles.footerNote}>
-          NG GLOBAL v2.0 • Secured with Hardware Device Binding
-        </Text>
       </View>
     </AppScreenContainer>
   );

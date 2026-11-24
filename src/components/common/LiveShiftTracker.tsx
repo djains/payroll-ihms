@@ -105,6 +105,8 @@ export const LiveShiftTracker: React.FC = () => {
   const lastLoggedRef = useRef<{ lat: number; lon: number } | null>(null);
   const isOutsideUnitRef = useRef<boolean>(false);
   const isSendingRef = useRef<boolean>(false);
+  const cachedAddrRef = useRef<string>('');
+  const lastReverseGeoTimeRef = useRef<number>(0);
 
   const empCode = currentUser?.empCode || currentUser?.username || '';
   const role = currentUser?.role;
@@ -181,25 +183,33 @@ export const LiveShiftTracker: React.FC = () => {
     try {
       let addr = `${currentUser?.branchOrUnit || 'Field Location'} • ${distanceInfo}`;
 
-      // Reverse geocode via OpenStreetMap Nominatim
-      try {
-        const controller = new AbortController();
-        const tid = setTimeout(() => controller.abort(), 4000);
-        const geoRes = await fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
-          {
-            headers: { 'User-Agent': 'IHMS-Mobile-App/1.0' },
-            signal: controller.signal,
+      // Reverse geocode via OpenStreetMap Nominatim (Throttled to at most once per 5 minutes to prevent spam & save battery)
+      const nowTs = Date.now();
+      if (!cachedAddrRef.current || nowTs - lastReverseGeoTimeRef.current > 300000) {
+        try {
+          const controller = new AbortController();
+          const tid = setTimeout(() => controller.abort(), 4000);
+          const geoRes = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
+            {
+              headers: { 'User-Agent': 'IHMS-Mobile-App/1.0' },
+              signal: controller.signal,
+            }
+          );
+          clearTimeout(tid);
+          if (geoRes.ok) {
+            const geoJson: any = await geoRes.json();
+            if (geoJson?.display_name) {
+              cachedAddrRef.current = String(geoJson.display_name).trim().slice(0, 200);
+              lastReverseGeoTimeRef.current = nowTs;
+            }
           }
-        );
-        clearTimeout(tid);
-        if (geoRes.ok) {
-          const geoJson: any = await geoRes.json();
-          if (geoJson?.display_name) {
-            addr = `${String(geoJson.display_name).trim().slice(0, 200)} (${distanceInfo})`;
-          }
-        }
-      } catch {}
+        } catch {}
+      }
+
+      if (cachedAddrRef.current) {
+        addr = `${cachedAddrRef.current} (${distanceInfo})`;
+      }
 
       await apiClient.post<any>(
         '/api/mobile/Employee_geolocation_lat_long/',

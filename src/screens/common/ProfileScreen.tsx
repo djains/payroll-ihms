@@ -262,6 +262,9 @@ export const ProfileScreen: React.FC = () => {
             if (!isCompanyAdmin && currentUser && currentUser.name !== resolvedName) {
               useAuthStore.getState().updateCurrentUser({ name: resolvedName });
             }
+            if (uData.JOINING_DATE && currentUser && currentUser.joiningDate !== uData.JOINING_DATE) {
+              useAuthStore.getState().updateCurrentUser({ joiningDate: uData.JOINING_DATE });
+            }
           }
         }
 
@@ -306,8 +309,24 @@ export const ProfileScreen: React.FC = () => {
         if (!resolvedPhotoPath && userDetailsRes.status === 'fulfilled' && userDetailsRes.value.success && userDetailsRes.value.data) {
           const uList = userDetailsRes.value.data;
           const uData = Array.isArray(uList) ? uList[0] : uList;
-          if (uData && (uData.EMP_PHOTO || uData.PHOTO || uData.IMAGE_PATH)) {
-            resolvedPhotoPath = uData.EMP_PHOTO || uData.PHOTO || uData.IMAGE_PATH;
+          if (uData) {
+            const rawDept = String(uData.DEPT_CODE || '').trim();
+            const looksLikeImg =
+              rawDept.toLowerCase().endsWith('.jpg') ||
+              rawDept.toLowerCase().endsWith('.png') ||
+              rawDept.toLowerCase().endsWith('.jpeg') ||
+              rawDept.includes('/') ||
+              rawDept.toLowerCase().includes('photo') ||
+              rawDept.toLowerCase().includes('emp_images') ||
+              rawDept.toLowerCase().includes('temp_images');
+            const candidate =
+              uData.EMP_PHOTO ||
+              uData.PHOTO ||
+              uData.IMAGE_PATH ||
+              (looksLikeImg ? rawDept : null);
+            if (candidate) {
+              resolvedPhotoPath = candidate;
+            }
           }
         }
 
@@ -317,6 +336,9 @@ export const ProfileScreen: React.FC = () => {
             newAvatar = imgSource;
             setAvatarSource(imgSource);
             setAvatarError(false);
+            if (!currentUser?.avatarUrl) {
+              updateCurrentUser({ avatarUrl: imgSource.uri });
+            }
           }
         }
 
@@ -595,7 +617,13 @@ export const ProfileScreen: React.FC = () => {
                   source={avatarSource}
                   style={styles.avatarImage}
                   resizeMode="cover"
-                  onError={() => setAvatarError(true)}
+                  onError={() => {
+                    if (currentUser?.avatarUrl && avatarSource?.uri !== currentUser.avatarUrl) {
+                      setAvatarSource({ uri: currentUser.avatarUrl });
+                    } else {
+                      setAvatarError(true);
+                    }
+                  }}
                 />
               ) : (
                 <Text style={styles.avatarText}>{initials || currentUser.username?.substring(0, 2).toUpperCase() || 'U'}</Text>

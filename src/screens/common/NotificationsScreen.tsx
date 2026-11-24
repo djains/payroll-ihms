@@ -36,6 +36,20 @@ export const NotificationsScreen: React.FC = () => {
 
   const [refreshing, setRefreshing] = useState<boolean>(false);
 
+  const userEmpCode = String(currentUser?.empCode || currentUser?.username || '').trim().toLowerCase();
+  const isCompanyAdmin =
+    currentUser?.role === 'COMPANY_ADMIN' ||
+    currentUser?.role === 'ADMIN' ||
+    currentUser?.role === 'SUPER_ADMIN' ||
+    Boolean((currentUser as any)?.isCompanyAdmin);
+
+  const visibleNotifications = notifications.filter((n) => {
+    if (isCompanyAdmin) return true;
+    if (!n.empCode) return true;
+    return n.empCode.toLowerCase() === userEmpCode;
+  });
+  const myUnreadCount = visibleNotifications.filter((n) => !n.read).length;
+
   useEffect(() => {
     syncNotifications(currentUser);
   }, [currentUser]);
@@ -67,7 +81,7 @@ export const NotificationsScreen: React.FC = () => {
           subtitle="Alerts & Shift Reminders"
           onBack={goBack}
           rightComponent={
-            unreadCount > 0 ? (
+            myUnreadCount > 0 ? (
               <TouchableOpacity
                 onPress={markAllAsRead}
                 style={styles.markReadBtn}
@@ -83,7 +97,7 @@ export const NotificationsScreen: React.FC = () => {
       contentContainerStyle={styles.container}
     >
       {/* Notifications List */}
-      {notifications.length === 0 ? (
+      {visibleNotifications.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={styles.emptyIconWrap}>
             <AppIcon name="bell" size={36} color="#94A3B8" />
@@ -94,7 +108,7 @@ export const NotificationsScreen: React.FC = () => {
           </Text>
         </View>
       ) : (
-        notifications.map((item) => {
+        visibleNotifications.map((item) => {
           const isUnread = !item.read;
 
           let iconName = 'bell';
@@ -168,7 +182,7 @@ export const NotificationsScreen: React.FC = () => {
       )}
 
       {/* Footer Clear All */}
-      {notifications.length > 0 && (
+      {visibleNotifications.length > 0 && (
         <View style={styles.footerActions}>
           <TouchableOpacity
             style={styles.clearBtn}

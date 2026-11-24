@@ -27,6 +27,7 @@ export interface User {
   role: RoleCode;
   companyId: string | null;
   avatarUrl?: string;
+  joiningDate?: string;
   assignedUnitLatitude?: number;
   assignedUnitLongitude?: number;
   assignedUnitRadiusMeters?: number;

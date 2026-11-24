@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { AppIcon } from './AppIcon';
 import { useNotificationStore, NotificationItem } from '../../store/notificationStore';
+import { useAuthStore } from '../../store/authStore';
 import { useNavigation } from '../../navigation';
 import { colors } from '../../theme/colors';
 import { ms } from '../../theme/responsive';
@@ -35,9 +36,24 @@ function formatRelativeTime(isoStr: string): string {
 }
 
 export const NotificationModal: React.FC = () => {
+  const { currentUser } = useAuthStore();
   const { notifications, unreadCount, isOpen, setOpen, markAsRead, markAllAsRead, clearNotifications } =
     useNotificationStore();
   const { navigate } = useNavigation();
+
+  const userEmpCode = String(currentUser?.empCode || currentUser?.username || '').trim().toLowerCase();
+  const isCompanyAdmin =
+    currentUser?.role === 'COMPANY_ADMIN' ||
+    currentUser?.role === 'ADMIN' ||
+    currentUser?.role === 'SUPER_ADMIN' ||
+    Boolean((currentUser as any)?.isCompanyAdmin);
+
+  const visibleNotifications = notifications.filter((n) => {
+    if (isCompanyAdmin) return true;
+    if (!n.empCode) return true;
+    return n.empCode.toLowerCase() === userEmpCode;
+  });
+  const myUnreadCount = visibleNotifications.filter((n) => !n.read).length;
 
   const handleNotificationPress = (item: NotificationItem) => {
     markAsRead(item.id);
@@ -73,15 +89,15 @@ export const NotificationModal: React.FC = () => {
                     <AppIcon name="bell" size={18} color="#0F766E" />
                   </View>
                   <Text style={styles.headerTitle}>Notifications</Text>
-                  {unreadCount > 0 && (
+                  {myUnreadCount > 0 && (
                     <View style={styles.unreadBadge}>
-                      <Text style={styles.unreadBadgeText}>{unreadCount} New</Text>
+                      <Text style={styles.unreadBadgeText}>{myUnreadCount} New</Text>
                     </View>
                   )}
                 </View>
 
                 <View style={styles.headerActions}>
-                  {unreadCount > 0 && (
+                  {myUnreadCount > 0 && (
                     <TouchableOpacity
                       onPress={markAllAsRead}
                       style={styles.markAllBtn}
@@ -106,7 +122,7 @@ export const NotificationModal: React.FC = () => {
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
               >
-                {notifications.length === 0 ? (
+                {visibleNotifications.length === 0 ? (
                   <View style={styles.emptyContainer}>
                     <View style={styles.emptyIconCircle}>
                       <AppIcon name="bell" size={32} color="#94A3B8" />
@@ -117,7 +133,7 @@ export const NotificationModal: React.FC = () => {
                     </Text>
                   </View>
                 ) : (
-                  notifications.map((item) => {
+                  visibleNotifications.map((item) => {
                     const isUnread = !item.read;
                     const cardBg = isUnread ? '#F0FDFA' : '#FFFFFF';
                     const borderColor = isUnread ? '#99F6E4' : '#E2E8F0';
@@ -178,7 +194,7 @@ export const NotificationModal: React.FC = () => {
               </ScrollView>
 
               {/* Bottom Clear Footer */}
-              {notifications.length > 0 && (
+              {visibleNotifications.length > 0 && (
                 <View style={styles.footerRow}>
                   <TouchableOpacity
                     onPress={clearNotifications}
