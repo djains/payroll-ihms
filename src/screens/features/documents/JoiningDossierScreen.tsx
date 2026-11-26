@@ -117,24 +117,29 @@ export const JoiningDossierScreen: React.FC = () => {
   const openCameraPicker = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
-      launchCamera({ mediaType: 'photo', quality: 0.8, saveToPhotos: false }, (response) => {
-        if (response.assets && response.assets.length > 0) {
-          const asset = response.assets[0];
-          processUpload({
-            uri: asset.uri || '',
-            name: asset.fileName || `${activeUploadDoc?.key || 'doc'}_${Date.now()}.jpg`,
-            type: asset.type || 'image/jpeg',
-          });
+      launchCamera(
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6, saveToPhotos: false },
+        (response) => {
+          if (response.assets && response.assets.length > 0) {
+            const asset = response.assets[0];
+            processUpload({
+              uri: asset.uri || '',
+              name: asset.fileName || `${activeUploadDoc?.key || 'doc'}_${Date.now()}.jpg`,
+              type: asset.type || 'image/jpeg',
+            });
+          }
         }
-      });
+      );
     }, 250);
   };
 
   const openGalleryPicker = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
-      launchImageLibrary({ mediaType: 'photo', quality: 0.8 }, (response) => {
-        if (response.assets && response.assets.length > 0) {
+      launchImageLibrary(
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6 },
+        (response) => {
+          if (response.assets && response.assets.length > 0) {
           const asset = response.assets[0];
           processUpload({
             uri: asset.uri || '',

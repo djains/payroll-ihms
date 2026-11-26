@@ -693,7 +693,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
       // Lazy load petty cash, guard deployment and work proof for staff/supervisors
       const results = await Promise.allSettled([
         timedApi('Punch Logs (GET /api/attendance/android-logs/)', () => staffApi.getLivePunchLogs(empCode)),
-        timedApi('Salary Details (GET /api/payroll/staff-salaries/)', () => staffApi.getSalaryDetails(empCode)),
+        timedApi('Salary Slips (GET /api/payroll/mobile-salary-slip/months/)', () => staffApi.getMobileSalarySlipMonths()),
         timedApi('Leave Applications (GET /api/leaves/applications/)', () => staffApi.getLeaveApplications()),
         timedApi('Documents & KYC (GET /api/hr/android-documents/)', () => staffApi.getDocumentsStatus(empCode)),
         isSupervisor
@@ -709,60 +709,19 @@ export const UnifiedDashboardScreen: React.FC = () => {
 
       const [attRes, salRes, leaveRes, docRes, pettyRes, guardsRes, workProofRes] = results;
 
-      // Resolve latest Salary Slip month strictly from SQL
+      // Resolve latest Salary Slip month strictly from SQL via official mobile salary slip API
       let resolvedLabel = '';
       const MONTHS_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
-        const sList = (salRes.value.data as any).results || salRes.value.data;
-        if (Array.isArray(sList) && sList.length > 0) {
-          const mNum = parseInt(sList[0].month || sList[0].salary_month, 10);
-          const yNum = parseInt(sList[0].year || sList[0].salary_year, 10);
+        const mList = (salRes.value.data as any).results || salRes.value.data;
+        if (Array.isArray(mList) && mList.length > 0) {
+          const sorted = [...mList].sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
+          const mNum = parseInt(sorted[0].month, 10);
+          const yNum = parseInt(sorted[0].year, 10);
           if (mNum >= 1 && mNum <= 12 && yNum) {
             resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
           }
         }
-      }
-      if (!resolvedLabel) {
-        try {
-          const realUnitCode = (currentUser as any)?.scope?.unit_code || '';
-          const proRes = await staffApi.getApprovedSalaryList({
-            ...(realUnitCode ? { unit_code: realUnitCode } : {}),
-            emp_code: empCode,
-          });
-          if (proRes.success && proRes.data) {
-            const proList = Array.isArray((proRes.data as any).results)
-              ? (proRes.data as any).results
-              : Array.isArray(proRes.data)
-              ? proRes.data
-              : [];
-            const cleanEmp = String(empCode || '').trim().toUpperCase();
-            const myRows = proList.filter(
-              (r: any) => String(r.emp_code || '').trim().toUpperCase() === cleanEmp
-            );
-            if (myRows.length > 0) {
-              myRows.sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
-              const mNum = parseInt(myRows[0].month, 10);
-              const yNum = parseInt(myRows[0].year, 10);
-              if (mNum >= 1 && mNum <= 12 && yNum) {
-                resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
-              }
-            }
-          }
-          if (!resolvedLabel) {
-            const mRes = await staffApi.getMobileSalarySlipMonths();
-            if (mRes.success && mRes.data) {
-              const mList = (mRes.data as any).results || mRes.data;
-              if (Array.isArray(mList) && mList.length > 0) {
-                const sorted = [...mList].sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
-                const mNum = parseInt(sorted[0].month, 10);
-                const yNum = parseInt(sorted[0].year, 10);
-                if (mNum >= 1 && mNum <= 12 && yNum) {
-                  resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
-                }
-              }
-            }
-          }
-        } catch {}
       }
       if (resolvedLabel) {
         setLatestSalaryMonthLabel(resolvedLabel);

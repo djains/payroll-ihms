@@ -7,6 +7,7 @@ import {
   TouchableWithoutFeedback,
   ScrollView,
   AppState,
+  Platform,
 } from 'react-native';
 import { useAuthStore } from '../../store/authStore';
 import { usePermissionStore } from '../../store/permissionStore';
@@ -19,8 +20,11 @@ export const PermissionPromptModal: React.FC = () => {
   const {
     isModalVisible,
     status,
+    isBackgroundGranted,
     checkPermissions,
     requestPermissions,
+    checkBackgroundPermission,
+    requestBackgroundPermission,
     hideModal,
   } = usePermissionStore();
 
@@ -58,6 +62,12 @@ export const PermissionPromptModal: React.FC = () => {
   const handleGrantPress = async () => {
     setHasRequestedOnce(true);
     await requestPermissions();
+    if (Platform.OS === 'android') {
+      const bgGranted = await checkBackgroundPermission();
+      if (!bgGranted) {
+        await requestBackgroundPermission();
+      }
+    }
   };
 
   return (
@@ -166,7 +176,44 @@ export const PermissionPromptModal: React.FC = () => {
                   </View>
                 </View>
 
-                {/* 3. Notification Permission */}
+                {/* 3. Background Location (Allow All The Time) - Android 10+ */}
+                {Platform.OS === 'android' && (
+                  <View style={styles.permissionItem}>
+                    <View style={[styles.iconBox, { backgroundColor: '#F0FDF4', borderColor: '#BBF7D0' }]}>
+                      <AppIcon name="location" size={20} color="#16A34A" />
+                    </View>
+                    <View style={styles.textContainer}>
+                      <View style={styles.itemTitleRow}>
+                        <Text style={styles.itemTitle} numberOfLines={1}>Background Location</Text>
+                        <View
+                          style={[
+                            styles.statusBadge,
+                            { backgroundColor: isBackgroundGranted ? '#DCFCE7' : '#FEF3C7' },
+                          ]}
+                        >
+                          <AppIcon
+                            name={isBackgroundGranted ? 'check' : 'alert'}
+                            size={10}
+                            color={isBackgroundGranted ? '#16A34A' : '#D97706'}
+                          />
+                          <Text
+                            style={[
+                              styles.statusBadgeText,
+                              { color: isBackgroundGranted ? '#16A34A' : '#D97706' },
+                            ]}
+                          >
+                            {isBackgroundGranted ? 'Allowed' : 'All The Time'}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.itemDescription}>
+                        Keeps live shift & geofence tracking active during duty hours even when phone screen is locked.
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                {/* 4. Notification Permission */}
                 <View style={styles.permissionItem}>
                   <View style={[styles.iconBox, { backgroundColor: '#FEF3C7', borderColor: '#FDE68A' }]}>
                     <AppIcon name="bell" size={20} color="#D97706" />

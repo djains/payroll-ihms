@@ -62,7 +62,7 @@ export const ProfileScreen: React.FC = () => {
         {
           mediaType: 'photo',
           cameraType: 'front',
-          quality: 0.8,
+          quality: 0.6,
           maxWidth: 1024,
           maxHeight: 1024,
           includeBase64: true,
@@ -86,7 +86,7 @@ export const ProfileScreen: React.FC = () => {
       launchImageLibrary(
         {
           mediaType: 'photo',
-          quality: 0.8,
+          quality: 0.6,
           maxWidth: 1024,
           maxHeight: 1024,
           includeBase64: true,

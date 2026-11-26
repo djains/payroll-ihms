@@ -4,6 +4,7 @@ import { WebView } from 'react-native-webview';
 import { useAuthStore } from '../../store/authStore';
 import { useShiftTrackingStore } from '../../store/shiftTrackingStore';
 import { useNotificationStore } from '../../store/notificationStore';
+import { usePermissionStore } from '../../store/permissionStore';
 import { showToast } from '../../store/toastStore';
 import { apiClient, API_ENDPOINTS } from '../../api';
 import { ANDROID_API_KEY, apiConfig } from '../../api/config';
@@ -193,18 +194,13 @@ export const LiveShiftTracker: React.FC = () => {
         }
         if (!fineGranted || cancelled) return;
 
-        // Android 10+ (API 29+) requires ACCESS_BACKGROUND_LOCATION for tracking after app close
+        // Android 10+ (API 29+) requires ACCESS_BACKGROUND_LOCATION for tracking after app close.
+        // Show prominent disclosure modal if permission is not yet granted.
         if (typeof Platform.Version === 'number' && Platform.Version >= 29) {
           const bgPerm = 'android.permission.ACCESS_BACKGROUND_LOCATION' as any;
           const bgGranted = await PermissionsAndroid.check(bgPerm);
           if (!bgGranted) {
-            await PermissionsAndroid.request(bgPerm, {
-              title: 'Background Location Required',
-              message:
-                'Allow location access "All the time" so duty shift live tracking continues even when the app is closed.',
-              buttonPositive: 'Allow',
-              buttonNegative: 'Later',
-            });
+            usePermissionStore.getState().showBackgroundModal();
           }
         }
 

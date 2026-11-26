@@ -96,7 +96,7 @@ export const GroomingChecklistScreen: React.FC = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
       launchCamera(
-        { mediaType: 'photo', quality: 0.7, includeBase64: true, saveToPhotos: false },
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6, includeBase64: true, saveToPhotos: false },
         (response) => {
           if (response.assets && response.assets.length > 0) {
             const asset = response.assets[0];
@@ -121,7 +121,7 @@ export const GroomingChecklistScreen: React.FC = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
       launchImageLibrary(
-        { mediaType: 'photo', quality: 0.7, includeBase64: true },
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6, includeBase64: true },
         (response) => {
           if (response.assets && response.assets.length > 0) {
             const asset = response.assets[0];

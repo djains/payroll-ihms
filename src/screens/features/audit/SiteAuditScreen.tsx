@@ -131,7 +131,7 @@ export const SiteAuditScreen: React.FC = () => {
 
     setTimeout(() => {
       launchCamera(
-        { mediaType: 'photo', quality: 0.7, includeBase64: true, saveToPhotos: false },
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6, includeBase64: true, saveToPhotos: false },
         (response) => {
           if (response.didCancel || response.errorCode) return;
           const asset = response.assets?.[0];
@@ -158,7 +158,7 @@ export const SiteAuditScreen: React.FC = () => {
 
     setTimeout(() => {
       launchImageLibrary(
-        { mediaType: 'photo', quality: 0.7, includeBase64: true },
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6, includeBase64: true },
         (response) => {
           if (response.didCancel || response.errorCode) return;
           const asset = response.assets?.[0];

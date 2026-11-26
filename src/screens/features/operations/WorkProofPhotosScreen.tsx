@@ -254,7 +254,9 @@ export const WorkProofPhotosScreen: React.FC = () => {
       const response = await launchCamera({
         mediaType: 'photo',
         cameraType: 'back',
-        quality: 0.7,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        quality: 0.6,
         saveToPhotos: false,
       });
 

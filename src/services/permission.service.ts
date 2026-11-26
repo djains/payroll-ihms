@@ -132,3 +132,37 @@ export async function openAppSettings(): Promise<void> {
     console.warn('[PermissionService] Could not open app settings:', e);
   }
 }
+
+/**
+ * Checks if ACCESS_BACKGROUND_LOCATION is granted (Android 10+ / API 29+).
+ */
+export async function checkBackgroundLocationPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  if (typeof Platform.Version === 'number' && Platform.Version >= 29) {
+    try {
+      const bgPerm = 'android.permission.ACCESS_BACKGROUND_LOCATION' as any;
+      return await PermissionsAndroid.check(bgPerm);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Requests ACCESS_BACKGROUND_LOCATION (Android 10+ / API 29+).
+ */
+export async function requestBackgroundLocationPermission(): Promise<boolean> {
+  if (Platform.OS !== 'android') return true;
+  if (typeof Platform.Version === 'number' && Platform.Version >= 29) {
+    try {
+      const bgPerm = 'android.permission.ACCESS_BACKGROUND_LOCATION' as any;
+      const res = await PermissionsAndroid.request(bgPerm);
+      return res === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (e) {
+      console.warn('[PermissionService] Background location request error:', e);
+      return false;
+    }
+  }
+  return true;
+}

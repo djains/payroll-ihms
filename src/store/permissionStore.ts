@@ -3,6 +3,8 @@ import * as Keychain from 'react-native-keychain';
 import {
   checkAppPermissions,
   requestAppPermissions,
+  checkBackgroundLocationPermission,
+  requestBackgroundLocationPermission,
   AppPermissionStatus,
 } from '../services/permission.service';
 
@@ -14,12 +16,22 @@ interface PermissionStoreState {
   isChecking: boolean;
   hasPromptBeenSeen: boolean;
 
+  // Background Location Specific State
+  isBackgroundModalVisible: boolean;
+  isBackgroundGranted: boolean;
+
   // Actions
   checkPermissions: (force?: boolean) => Promise<boolean>;
   requestPermissions: () => Promise<boolean>;
   hideModal: () => void;
   markAsSeen: () => Promise<void>;
   resetSeenFlag: () => Promise<void>;
+
+  // Background Location Actions
+  showBackgroundModal: () => void;
+  hideBackgroundModal: () => void;
+  checkBackgroundPermission: () => Promise<boolean>;
+  requestBackgroundPermission: () => Promise<boolean>;
 }
 
 export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
@@ -27,24 +39,28 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
   status: null,
   isChecking: false,
   hasPromptBeenSeen: false,
+  isBackgroundModalVisible: false,
+  isBackgroundGranted: false,
 
   checkPermissions: async (force = false) => {
     set({ isChecking: true });
     try {
       const status = await checkAppPermissions();
+      const bgGranted = await checkBackgroundLocationPermission();
 
       // Compulsory permissions: Location & Camera (strictly mandatory for geofenced attendance & live selfie verification)
       const hasCompulsory = status.location && status.camera;
 
       if (hasCompulsory) {
         // All compulsory permissions are granted
-        set({ status, isChecking: false, isModalVisible: false });
+        set({ status, isBackgroundGranted: bgGranted, isChecking: false, isModalVisible: false });
         return true;
       }
 
       // If compulsory permissions are NOT granted, ALWAYS show modal until user grants them!
       set({
         status,
+        isBackgroundGranted: bgGranted,
         isChecking: false,
         isModalVisible: true,
       });
@@ -59,12 +75,14 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
   requestPermissions: async () => {
     try {
       const updatedStatus = await requestAppPermissions();
+      const bgGranted = await checkBackgroundLocationPermission();
       const hasCompulsory = updatedStatus.location && updatedStatus.camera;
 
       if (hasCompulsory) {
         await get().markAsSeen();
         set({
           status: updatedStatus,
+          isBackgroundGranted: bgGranted,
           isModalVisible: false,
         });
         return true;
@@ -72,6 +90,7 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
         // Compulsory permissions are still missing -> keep modal open so user can allow or open settings
         set({
           status: updatedStatus,
+          isBackgroundGranted: bgGranted,
           isModalVisible: true,
         });
         return false;
@@ -110,5 +129,20 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     if (status?.location && status?.camera) {
       set({ isModalVisible: false });
     }
+  },
+
+  showBackgroundModal: () => set({ isBackgroundModalVisible: true }),
+  hideBackgroundModal: () => set({ isBackgroundModalVisible: false }),
+
+  checkBackgroundPermission: async () => {
+    const granted = await checkBackgroundLocationPermission();
+    set({ isBackgroundGranted: granted });
+    return granted;
+  },
+
+  requestBackgroundPermission: async () => {
+    const granted = await requestBackgroundLocationPermission();
+    set({ isBackgroundGranted: granted, isBackgroundModalVisible: !granted });
+    return granted;
   },
 }));

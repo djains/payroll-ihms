@@ -245,21 +245,24 @@ export const DocumentStatusScreen: React.FC = () => {
   const openCameraPicker = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
-      launchCamera({ mediaType: 'photo', quality: 0.8 }, (response) => {
-        if (response.assets && response.assets.length > 0) {
-          const asset = response.assets[0];
-          setPickedPhoto({
-            uri: asset.uri || '',
-            name: asset.fileName || `${selectedCategory.key}_${Date.now()}.jpg`,
-            type: asset.type || 'image/jpeg',
-          });
-          showToast({
-            type: 'success',
-            title: 'Photo Attached',
-            message: `New photo chosen for ${selectedCategory.shortTitle}.`,
-          });
+      launchCamera(
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6, saveToPhotos: false },
+        (response) => {
+          if (response.assets && response.assets.length > 0) {
+            const asset = response.assets[0];
+            setPickedPhoto({
+              uri: asset.uri || '',
+              name: asset.fileName || `${selectedCategory.key}_${Date.now()}.jpg`,
+              type: asset.type || 'image/jpeg',
+            });
+            showToast({
+              type: 'success',
+              title: 'Photo Attached',
+              message: `New photo chosen for ${selectedCategory.shortTitle}.`,
+            });
+          }
         }
-      });
+      );
     }, 250);
   };
 
@@ -267,8 +270,10 @@ export const DocumentStatusScreen: React.FC = () => {
   const openGalleryPicker = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
-      launchImageLibrary({ mediaType: 'photo', quality: 0.8 }, (response) => {
-        if (response.assets && response.assets.length > 0) {
+      launchImageLibrary(
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6 },
+        (response) => {
+          if (response.assets && response.assets.length > 0) {
           const asset = response.assets[0];
           setPickedPhoto({
             uri: asset.uri || '',

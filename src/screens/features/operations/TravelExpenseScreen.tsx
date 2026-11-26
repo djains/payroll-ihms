@@ -212,30 +212,35 @@ export const TravelExpenseScreen: React.FC = () => {
   const openCameraPicker = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
-      launchCamera({ mediaType: 'photo', quality: 0.8, saveToPhotos: false }, (response) => {
-        if (response.assets && response.assets.length > 0) {
-          const asset = response.assets[0];
-          if (asset.uri) {
-            setReceiptImage({
-              uri: asset.uri,
-              name: asset.fileName || `conveyance_${Date.now()}.jpg`,
-              type: asset.type || 'image/jpeg',
-            });
-            showToast({
-              type: 'success',
-              title: 'Receipt Captured',
-              message: 'Conveyance proof photo attached.',
-            });
+      launchCamera(
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6, saveToPhotos: false },
+        (response) => {
+          if (response.assets && response.assets.length > 0) {
+            const asset = response.assets[0];
+            if (asset.uri) {
+              setReceiptImage({
+                uri: asset.uri,
+                name: asset.fileName || `conveyance_${Date.now()}.jpg`,
+                type: asset.type || 'image/jpeg',
+              });
+              showToast({
+                type: 'success',
+                title: 'Receipt Captured',
+                message: 'Conveyance proof photo attached.',
+              });
+            }
           }
         }
-      });
+      );
     }, 250);
   };
 
   const openGalleryPicker = () => {
     setIsPhotoPickerOpen(false);
     setTimeout(() => {
-      launchImageLibrary({ mediaType: 'photo', quality: 0.8 }, (response) => {
+      launchImageLibrary(
+        { mediaType: 'photo', maxWidth: 1024, maxHeight: 1024, quality: 0.6 },
+        (response) => {
         if (response.assets && response.assets.length > 0) {
           const asset = response.assets[0];
           if (asset.uri) {

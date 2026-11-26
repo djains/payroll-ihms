@@ -572,7 +572,9 @@ export const AddStaffScreen: React.FC = () => {
 
       const response = await launchCamera({
         mediaType: 'photo',
-        quality: 0.8,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        quality: 0.6,
         saveToPhotos: false,
         includeBase64: target === 'photo',
       });
@@ -634,7 +636,9 @@ export const AddStaffScreen: React.FC = () => {
     try {
       const response = await launchImageLibrary({
         mediaType: 'photo',
-        quality: 0.8,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        quality: 0.6,
         includeBase64: target === 'photo',
       });
 
