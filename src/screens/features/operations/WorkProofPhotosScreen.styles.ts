@@ -10,6 +10,8 @@ export const styles = StyleSheet.create({
   // Modern Edge-to-Edge Segmented Tabs
   tabBar: {
     flexDirection: 'row',
+    height: ms(44),
+    alignItems: 'center',
     backgroundColor: '#F1F5F9',
     borderRadius: borderRadius.lg,
     padding: ms(4),
@@ -19,11 +21,11 @@ export const styles = StyleSheet.create({
   },
   tabItem: {
     flex: 1,
+    height: ms(36),
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: ms(6),
-    paddingVertical: ms(9),
     borderRadius: borderRadius.md,
   },
   tabItemActive: {

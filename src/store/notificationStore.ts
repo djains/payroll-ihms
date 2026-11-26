@@ -430,40 +430,6 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
       } catch { }
     }
 
-    // -------------------------------------------------------------
-    // B. COMPANY ADMIN NOTIFICATIONS (Live Geofence Breaches)
-    // -------------------------------------------------------------
-    if (isCompanyAdmin) {
-      try {
-        // Query recent live GPS tracking logs to detect guards who moved outside site boundary
-        const geoRes = await apiClient.get<any>(
-          `/api/mobile/Employee_geolocation_lat_long/?limit=20`
-        );
-        if (geoRes.success && geoRes.data) {
-          const list = Array.isArray(geoRes.data) ? geoRes.data : (geoRes.data as any).results || [];
-          list.forEach((log: any) => {
-            const addr = String(log.current_address || log.address || '');
-            const emp = String(log.emp_code || log.EMP_CODE || '');
-            const distMatch = addr.match(/(\d+m\s+from\s+site|Moved\s+\+\d+m)/i);
-
-            if (emp && distMatch) {
-              const notifIdKey = `breach_${emp}_${log.date_time || log.Date_Time || ''}`;
-              const exists = get().notifications.some((n) => n.id === notifIdKey);
-              if (!exists) {
-                get().addNotification({
-                  title: 'Security Guard Out of Range',
-                  message: `Guard ${emp} has moved outside the designated site perimeter (${distMatch[0]}).`,
-                  type: 'danger',
-                  category: 'GEOFENCE',
-                  empCode: emp,
-                  distanceInfo: distMatch[0],
-                  targetScreen: 'WorkersList',
-                });
-              }
-            }
-          });
-        }
-      } catch { }
-    }
+    // Company Admin notifications: currently disabled to eliminate unnecessary / failing network calls
   },
 }));

@@ -304,7 +304,7 @@ export const ProfileScreen: React.FC = () => {
   const loadProfileData = async () => {
     try {
       if (empCode) {
-        const [salRes, meRes, userDetailsRes, hrEmployeesRes, kycRes, docsRes] = await Promise.allSettled([
+        const [salRes, meRes, userDetailsRes, hrEmployeesRes, kycRes, docsRes, modernDocsRes] = await Promise.allSettled([
           staffApi.getSalaryDetails(empCode),
           apiClient.request('/api/auth/me/'),
           apiClient.get<any>(`/api/mobile/GetUserDetails/?userName=${encodeURIComponent(empCode)}`, {
@@ -313,6 +313,7 @@ export const ProfileScreen: React.FC = () => {
           apiClient.get<any>(`/api/hr/employees/?search=${encodeURIComponent(empCode)}`),
           staffApi.getEmployeeKyc(empCode),
           staffApi.getDocumentsStatus(empCode),
+          staffApi.getEmployeeDocuments(empCode),
         ]);
 
         let newSal = salaryInfo;
@@ -403,7 +404,20 @@ export const ProfileScreen: React.FC = () => {
           }
         }
 
-        // 4. Resolve Employee Photo from verification documents (hr_document_verification / hr_employee_document)
+        // 4. Resolve Employee Photo from modern employee documents (hr_employee_document / employee_documents)
+        if (!resolvedPhotoPath && modernDocsRes.status === 'fulfilled' && modernDocsRes.value.success && modernDocsRes.value.data) {
+          const mRaw = modernDocsRes.value.data;
+          const mList: any[] = Array.isArray(mRaw) ? mRaw : (mRaw as any).results || [];
+          const mPhoto = mList.find((d: any) => {
+            const key = String(d.document_type || d.image_name || '').toLowerCase();
+            return (key.includes('photo') || key.includes('passport')) && (d.file || d.file_url || d.image_path || d.image_url);
+          });
+          if (mPhoto) {
+            resolvedPhotoPath = mPhoto.file || mPhoto.file_url || mPhoto.image_path || mPhoto.image_url;
+          }
+        }
+
+        // 4b. Fallback to legacy verification documents (hr_document_verification)
         if (!resolvedPhotoPath && docsRes.status === 'fulfilled' && docsRes.value.success && docsRes.value.data) {
           const dRaw = docsRes.value.data;
           const dList: any[] = Array.isArray(dRaw) ? dRaw : (dRaw as any).results || [];
@@ -444,6 +458,13 @@ export const ProfileScreen: React.FC = () => {
               resolvedPhotoPath = candidate;
             }
           }
+        }
+
+        // 6. Direct deterministic fallback for verified web portal uploads:
+        // /media/employee_documents/<comp_code>/<emp_code>/photo.jpg
+        if (!resolvedPhotoPath && empCode) {
+          const compCode = (currentUser as any)?.scope?.comp_code || (currentUser as any)?.companyId || 'C15';
+          resolvedPhotoPath = `/media/employee_documents/${compCode}/${empCode}/photo.jpg`;
         }
 
         if (resolvedPhotoPath) {

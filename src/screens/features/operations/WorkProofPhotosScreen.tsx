@@ -26,6 +26,7 @@ import { apiConfig } from '../../../api/config';
 import { API_ENDPOINTS } from '../../../api/config';
 import { colors } from '../../../theme';
 import { styles } from './WorkProofPhotosScreen.styles';
+import { companyWorkImagesReviewCache } from '../superadmin/CompanyWorkImagesReviewScreen';
 
 // 1. Strict Backend IMAGE_TYPES allowed in apps/employees/working_image.py
 const BACKEND_IMAGE_TYPES = [
@@ -336,6 +337,28 @@ export const WorkProofPhotosScreen: React.FC = () => {
         if (res.data && res.data.id) {
           localUploadedCategoryMap[res.data.id] = activeCategoryName;
         }
+
+        // Instantly update shared review cache for zero-flicker live counts on Dashboard
+        const now = new Date();
+        const dStr = String(now.getDate()).padStart(2, '0');
+        const mStr = String(now.getMonth() + 1).padStart(2, '0');
+        const yStr = String(now.getFullYear());
+        const todayFormatted = `${dStr}/${mStr}/${yStr}`;
+        if (!companyWorkImagesReviewCache.dateFormatted || companyWorkImagesReviewCache.dateFormatted === todayFormatted) {
+          companyWorkImagesReviewCache.dateFormatted = todayFormatted;
+          companyWorkImagesReviewCache.records.unshift({
+            id: res.data?.id || `upload-${Date.now()}`,
+            emp_code: empCode,
+            EMP_NAME: currentUser?.name || empCode,
+            unit_name: unitCode || 'Assigned Site',
+            category_name: activeCategoryName,
+            image_name: res.data?.image_name || '',
+            image_url: res.data?.image_url,
+            datecurrent: todayStr,
+          });
+          companyWorkImagesReviewCache.timestamp = Date.now();
+        }
+
         showToast({
           type: 'success',
           title: 'Work Proof Saved',

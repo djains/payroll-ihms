@@ -26,6 +26,7 @@ export interface User {
   branchOrUnit: string;
   role: RoleCode;
   companyId: string | null;
+  companyName?: string;
   avatarUrl?: string;
   joiningDate?: string;
   assignedUnitLatitude?: number;
@@ -35,6 +36,8 @@ export interface User {
   permissions?: UserPermission[];
   scope?: {
     comp_code?: string;
+    comp_name?: string;
+    company_name?: string;
     client_code?: string;
     unit_code?: string;
     unit_name?: string;

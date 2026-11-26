@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,10 @@ import {
   PermissionsAndroid,
   Linking,
   Share,
+  Modal,
+  FlatList,
+  StyleSheet,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
@@ -25,7 +29,7 @@ import {
   PasswordStrengthMeter,
 } from '../../../components/common';
 import { useNavigation } from '../../../navigation/navigationContext';
-import { superadminApi, staffApi, authApi, BackendUnit } from '../../../api';
+import { superadminApi, staffApi, authApi, BackendUnit, BackendStateItem } from '../../../api';
 import { useAuthStore } from '../../../store/authStore';
 import { showToast } from '../../../store/toastStore';
 import { z } from 'zod';
@@ -85,6 +89,78 @@ const addWorkerSchema = z
 
 type AddWorkerFormValues = z.infer<typeof addWorkerSchema>;
 
+// Module-level in-memory caches for instant zero-flicker Add Worker transitions
+let cachedStaffUnits: BackendUnit[] | null = null;
+let cachedStaffRoles: string[] | null = null;
+let cachedStaffDepts: Array<{ dept_code: string; dept_name: string }> | null = null;
+let cachedStaffStates: BackendStateItem[] | null = null;
+const cachedStaffCitiesByState: Record<string, string[]> = {};
+
+const ALL_INDIAN_STATES: string[] = [
+  'Andaman and Nicobar Islands',
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chandigarh',
+  'Chhattisgarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jammu and Kashmir',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Ladakh',
+  'Lakshadweep',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Puducherry',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+];
+
+// Timed API profiler helper function
+const timedStaffApi = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+  const t0 = Date.now();
+  try {
+    const res: any = await fn();
+    const cost = Date.now() - t0;
+    let detail = '';
+    if (res?.success && res?.data) {
+      const list = Array.isArray(res.data) ? res.data : res.data?.results;
+      if (Array.isArray(list)) {
+        detail = ` | Fetched ${list.length} records`;
+      } else if (typeof res.data === 'object') {
+        detail = ' | OK';
+      }
+    } else if (res && !res.success) {
+      detail = ` | Failed (${res.statusCode || ''}): ${res.error || 'Unknown error'}`;
+    }
+    console.log(`[AddStaff API] ⏱️ ${name} -> ${cost}ms${detail}`);
+    return res;
+  } catch (err) {
+    const cost = Date.now() - t0;
+    console.warn(`[AddStaff API] ❌ ${name} failed after ${cost}ms:`, err);
+    throw err;
+  }
+};
+
 export const AddStaffScreen: React.FC = () => {
   const { goBack, replace } = useNavigation();
   const { currentUser } = useAuthStore();
@@ -97,20 +173,32 @@ export const AddStaffScreen: React.FC = () => {
   const [empMobile, setEmpMobile] = useState('');
   const [empEmail, setEmpEmail] = useState('');
   const [sendCredentialsEmail, setSendCredentialsEmail] = useState(true);
-  const [selectedUnitCode, setSelectedUnitCode] = useState('');
-  const [selectedRole, setSelectedRole] = useState('');
+  const [selectedUnitCode, setSelectedUnitCode] = useState(cachedStaffUnits?.[0]?.unit_code || '');
+  const [selectedRole, setSelectedRole] = useState(cachedStaffRoles?.[0] || '');
   const [gender, setGender] = useState<'Male' | 'Female'>('Male');
   const [employeeType, setEmployeeType] = useState('Staff');
-  const [city, setCity] = useState('');
-  const [state, setState] = useState('');
+  const [city, setCity] = useState(cachedStaffUnits?.[0]?.unit_city || '');
+  const [state, setState] = useState(cachedStaffUnits?.[0]?.state_name || '');
   const [password, setPassword] = useState('');
   const [dob, setDob] = useState('');
   const [backendDob, setBackendDob] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
 
+  const [joiningDate, setJoiningDate] = useState('');
+  const [backendJoiningDate, setBackendJoiningDate] = useState('');
+  const [showJoiningDatePicker, setShowJoiningDatePicker] = useState(false);
+
+  const [bloodGroup, setBloodGroup] = useState('');
+
+  // Multi-step Wizard: 1 = Basic Info, 2 = Photo & KYC, 3 = Unit Deployment
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+
   // Next Code & Department
   const [nextEmpCode, setNextEmpCode] = useState('');
-  const [deptCode, setDeptCode] = useState('');
+  const [deptCode, setDeptCode] = useState(cachedStaffDepts?.[0]?.dept_code || '');
+  const [departmentsList, setDepartmentsList] = useState<Array<{ dept_code: string; dept_name: string }>>(
+    cachedStaffDepts || []
+  );
 
   // Worker Photo for Mandatory Verification Document
   const [workerPhoto, setWorkerPhoto] = useState<{
@@ -134,12 +222,24 @@ export const AddStaffScreen: React.FC = () => {
     type: string;
   } | null>(null);
 
-  // Dropdown lists fetched live from MySQL
-  const [unitsList, setUnitsList] = useState<BackendUnit[]>([]);
-  const [rolesList, setRolesList] = useState<string[]>([]);
-  const [loadingData, setLoadingData] = useState(true);
+  // Dropdown lists fetched live from MySQL (initialized from cache)
+  const [unitsList, setUnitsList] = useState<BackendUnit[]>(cachedStaffUnits || []);
+  const [rolesList, setRolesList] = useState<string[]>(cachedStaffRoles || []);
+  const [loadingData, setLoadingData] = useState(!(cachedStaffUnits && cachedStaffRoles && cachedStaffDepts));
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // States & Cities Picker State
+  const [availableStates, setAvailableStates] = useState<BackendStateItem[]>(cachedStaffStates || []);
+  const [loadingStates, setLoadingStates] = useState(false);
+  const [statePickerVisible, setStatePickerVisible] = useState(false);
+  const [stateSearch, setStateSearch] = useState('');
+
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [cityPickerVisible, setCityPickerVisible] = useState(false);
+  const [citySearch, setCitySearch] = useState('');
+  const inFlightCityRef = useRef<string | null>(null);
 
   // Alert Modal
   const [alertConfig, setAlertConfig] = useState<{
@@ -156,20 +256,74 @@ export const AddStaffScreen: React.FC = () => {
   });
 
   useEffect(() => {
+    const timedApi = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+      const t0 = Date.now();
+      try {
+        const res: any = await fn();
+        const cost = Date.now() - t0;
+        let detail = '';
+        if (res?.success && res?.data) {
+          const list = Array.isArray(res.data) ? res.data : res.data?.results;
+          if (Array.isArray(list)) {
+            detail = ` | Fetched ${list.length} records`;
+          } else if (typeof res.data === 'object') {
+            detail = ' | OK';
+          }
+        } else if (res && !res.success) {
+          detail = ` | Failed (${res.statusCode || ''}): ${res.error || 'Unknown error'}`;
+        }
+        console.log(`[AddStaff API] ⏱️ ${name} -> ${cost}ms${detail}`);
+        return res;
+      } catch (err) {
+        const cost = Date.now() - t0;
+        console.warn(`[AddStaff API] ❌ ${name} failed after ${cost}ms:`, err);
+        throw err;
+      }
+    };
+
     const loadPrerequisites = async () => {
+      const tStart = Date.now();
+      const hasAllCaches = Boolean(cachedStaffUnits && cachedStaffRoles && cachedStaffDepts);
+
+      if (hasAllCaches) {
+        console.log('[AddStaff] Cache Hit: Units/Roles/Depts loaded (0ms)');
+        try {
+          const codeRes = await timedApi('Next Emp Code (GET /api/hr/employees/next-code/)', () =>
+            staffApi.getNextEmpCode()
+          );
+          if (codeRes.success && codeRes.data?.emp_code) {
+            setNextEmpCode(codeRes.data.emp_code);
+          }
+        } catch {}
+        setLoadingData(false);
+        return;
+      }
+
       try {
         const [unitsRes, rolesRes, codeRes, deptRes] = await Promise.allSettled([
-          superadminApi.getUnits(),
-          superadminApi.getRolesFastList(),
-          staffApi.getNextEmpCode(),
-          staffApi.getDepartments(),
+          cachedStaffUnits
+            ? Promise.resolve({ success: true, data: cachedStaffUnits } as any)
+            : timedApi('Units Master (GET /api/masters/units/)', () => superadminApi.getUnits()),
+          cachedStaffRoles
+            ? Promise.resolve({ success: true, data: cachedStaffRoles } as any)
+            : timedApi('Roles List (GET /api/hr/roles/)', () => superadminApi.getRolesFastList()),
+          timedApi('Next Emp Code (GET /api/hr/employees/next-code/)', () => staffApi.getNextEmpCode()),
+          cachedStaffDepts
+            ? Promise.resolve({ success: true, data: cachedStaffDepts } as any)
+            : timedApi('Departments (GET /api/masters/departments/)', () => staffApi.getDepartments()),
         ]);
 
-        if (unitsRes.status === 'fulfilled' && unitsRes.value.success && unitsRes.value.data) {
+        let uCount = cachedStaffUnits?.length ?? 0;
+        let rCount = cachedStaffRoles?.length ?? 0;
+        let dCount = cachedStaffDepts?.length ?? 0;
+
+        if (!cachedStaffUnits && unitsRes.status === 'fulfilled' && unitsRes.value.success && unitsRes.value.data) {
           const list = Array.isArray(unitsRes.value.data)
             ? unitsRes.value.data
             : (unitsRes.value.data as any).results || [];
+          cachedStaffUnits = list;
           setUnitsList(list);
+          uCount = list.length;
           if (list.length > 0) {
             setSelectedUnitCode(list[0].unit_code);
             if (list[0].unit_city) setCity(list[0].unit_city);
@@ -177,7 +331,7 @@ export const AddStaffScreen: React.FC = () => {
           }
         }
 
-        if (rolesRes.status === 'fulfilled' && rolesRes.value.success && rolesRes.value.data) {
+        if (!cachedStaffRoles && rolesRes.status === 'fulfilled' && rolesRes.value.success && rolesRes.value.data) {
           const rData = rolesRes.value.data;
           let rList: string[] = [];
           if (Array.isArray(rData)) {
@@ -190,7 +344,9 @@ export const AddStaffScreen: React.FC = () => {
             const low = r.toLowerCase();
             return !low.startsWith('company admin') && low !== 'admin' && low !== 'superadmin';
           });
+          cachedStaffRoles = filtered;
           setRolesList(filtered);
+          rCount = filtered.length;
           if (filtered.length > 0) {
             setSelectedRole(filtered[0]);
           }
@@ -201,14 +357,41 @@ export const AddStaffScreen: React.FC = () => {
           if (code) setNextEmpCode(code);
         }
 
-        if (deptRes.status === 'fulfilled' && deptRes.value.success && deptRes.value.data) {
-          const dData = deptRes.value.data;
-          const dList = Array.isArray(dData) ? dData : dData?.results || [];
-          if (dList.length > 0) {
-            const d = dList[0];
-            setDeptCode(d.dept_code || d.dept_name || 'OPERATIONS');
+        if (!cachedStaffDepts) {
+          let normalizedDepts: Array<{ dept_code: string; dept_name: string }> = [];
+          if (deptRes.status === 'fulfilled' && deptRes.value.success && deptRes.value.data) {
+            const dData = deptRes.value.data;
+            const dList = Array.isArray(dData) ? dData : dData?.results || [];
+            normalizedDepts = dList
+              .map((d: any) => ({
+                dept_code: String(d.dept_code || d.code || '').trim(),
+                dept_name: String(d.dept_name || d.name || d.dept_code || '').trim(),
+              }))
+              .filter((d: any) => d.dept_code);
+          }
+
+          if (normalizedDepts.length === 0) {
+            normalizedDepts = [
+              { dept_code: 'Operation', dept_name: 'Operation' },
+              { dept_code: 'HR Department', dept_name: 'HR Department' },
+              { dept_code: 'Admin', dept_name: 'Admin' },
+              { dept_code: 'Account', dept_name: 'Account' },
+              { dept_code: 'Invoice/Finance', dept_name: 'Invoice/Finance' },
+              { dept_code: 'Manager', dept_name: 'Manager' },
+              { dept_code: 'Security', dept_name: 'Security' },
+              { dept_code: 'Housekeeping', dept_name: 'Housekeeping' },
+            ];
+          }
+
+          cachedStaffDepts = normalizedDepts;
+          setDepartmentsList(normalizedDepts);
+          dCount = normalizedDepts.length;
+          if (normalizedDepts.length > 0) {
+            setDeptCode(normalizedDepts[0].dept_code);
           }
         }
+
+        console.log(`[AddStaff] Sync: 4 APIs in ~${Date.now() - tStart}ms (Units: ${uCount}, Roles: ${rCount}, Depts: ${dCount})`);
       } catch (e) {
         console.warn('[AddStaffScreen] Error loading units/roles/code:', e);
       } finally {
@@ -218,6 +401,140 @@ export const AddStaffScreen: React.FC = () => {
 
     loadPrerequisites();
   }, []);
+
+  // Fetch States API
+  const fetchStates = async (isForce: boolean = false) => {
+    if (!isForce && cachedStaffStates) {
+      console.log(`[AddStaff API] ⚡ States Master -> Cache Hit (${cachedStaffStates.length} records)`);
+      setAvailableStates(cachedStaffStates);
+      return;
+    }
+    setLoadingStates(true);
+    try {
+      const res = await timedStaffApi('States Master (GET /api/masters/states/)', () =>
+        superadminApi.getStates()
+      );
+      if (res.success && res.data) {
+        const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        cachedStaffStates = list;
+        setAvailableStates(list);
+      }
+    } catch (e) {
+      console.warn('[AddStaff] fetch states error:', e);
+    } finally {
+      setLoadingStates(false);
+    }
+  };
+
+  // Fetch Cities API based on selected state
+  const fetchCitiesForState = async (targetState: string, isForce: boolean = false) => {
+    const cleanTarget = targetState.trim().toLowerCase();
+    if (!cleanTarget) {
+      setAvailableCities([]);
+      return;
+    }
+
+    if (!isForce && cachedStaffCitiesByState[cleanTarget]) {
+      console.log(`[AddStaff API] ⚡ Cities for ${targetState} -> Cache Hit (${cachedStaffCitiesByState[cleanTarget].length} cities)`);
+      setAvailableCities(cachedStaffCitiesByState[cleanTarget]);
+      return;
+    }
+
+    if (inFlightCityRef.current === cleanTarget) {
+      return;
+    }
+
+    const extractCities = (rows: any[]) => {
+      const map = new Map<string, string>();
+      rows.forEach((r: any) => {
+        const rowState = String(
+          r.state_name || r.STATE_NAME || r.name || r.state || r.stateName || ''
+        ).trim().toLowerCase();
+        const rawCity = String(
+          r.city || r.CITY || r.city_name || r.CITY_NAME || r.district || r.district_name || r.town || r.location || ''
+        ).trim();
+        if (
+          rawCity &&
+          (!rowState || rowState === cleanTarget || rowState.includes(cleanTarget) || cleanTarget.includes(rowState)) &&
+          !map.has(rawCity.toLowerCase())
+        ) {
+          map.set(rawCity.toLowerCase(), rawCity);
+        }
+      });
+      return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+    };
+
+    const initialCities = extractCities(availableStates);
+    if (initialCities.length > 0) {
+      setAvailableCities(initialCities);
+    }
+
+    inFlightCityRef.current = cleanTarget;
+    setLoadingCities(true);
+    try {
+      const res = await timedStaffApi(`Cities for ${targetState} (GET /api/masters/states/)`, () =>
+        superadminApi.getStates(targetState, 100, 1)
+      );
+      if (res.success && res.data) {
+        let allRows = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        const totalCount = typeof (res.data as any)?.count === 'number' ? (res.data as any).count : allRows.length;
+
+        if ((res.data as any)?.next && totalCount > allRows.length && totalCount <= 1000) {
+          const totalPages = Math.ceil(totalCount / 100);
+          const pagePromises = [];
+          for (let p = 2; p <= totalPages; p++) {
+            pagePromises.push(superadminApi.getStates(targetState, 100, p));
+          }
+          const extraResults = await Promise.allSettled(pagePromises);
+          extraResults.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value.success && r.value.data) {
+              const extraList = Array.isArray(r.value.data) ? r.value.data : (r.value.data as any).results || [];
+              allRows = [...allRows, ...extraList];
+            }
+          });
+        }
+
+        const merged = extractCities([...availableStates, ...allRows]);
+        cachedStaffCitiesByState[cleanTarget] = merged;
+        setAvailableCities(merged);
+      }
+    } catch (e) {
+      console.warn('[AddStaff] fetch cities error:', e);
+    } finally {
+      inFlightCityRef.current = null;
+      setLoadingCities(false);
+    }
+  };
+
+  // State filtering with fallback Indian states
+  const filteredStates = useMemo(() => {
+    const query = stateSearch.trim().toLowerCase();
+    const map = new Map<string, { sName: string; code?: string }>();
+
+    availableStates.forEach((s) => {
+      const name = String(s.state_name || '').trim();
+      if (name && !map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), { sName: name, code: s.state_code });
+      }
+    });
+
+    ALL_INDIAN_STATES.forEach((name) => {
+      if (!map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), { sName: name });
+      }
+    });
+
+    const all = Array.from(map.values()).sort((a, b) => a.sName.localeCompare(b.sName));
+    if (!query) return all;
+    return all.filter((s) => s.sName.toLowerCase().includes(query));
+  }, [availableStates, stateSearch]);
+
+  // City filtering
+  const filteredCities = useMemo(() => {
+    const query = citySearch.trim().toLowerCase();
+    if (!query) return availableCities;
+    return availableCities.filter((c) => c.toLowerCase().includes(query));
+  }, [availableCities, citySearch]);
 
   const requestCameraPermission = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') return true;
@@ -369,36 +686,69 @@ export const AddStaffScreen: React.FC = () => {
     }
   };
 
-  const handleRegisterEmployee = async () => {
-    // Validate with Zod
-    const validationResult = addWorkerSchema.safeParse({
-      empName,
-      empFatherName,
-      empMobile,
-      empEmail,
-      sendCredentialsEmail,
-      password,
-      selectedUnitCode,
-      selectedRole,
-      hasPhoto: !!workerPhoto,
-    });
+  // Step 1 Validation: Personal & Contact Details
+  const validateStep1 = () => {
+    const errs: Record<string, string> = {};
+    if (!empName.trim() || empName.trim().length < 2) {
+      errs.empName = 'Worker full name is required (min 2 chars).';
+    }
+    const cleanMobile = empMobile.replace(/\D/g, '');
+    if (!cleanMobile || cleanMobile.length !== 10) {
+      errs.empMobile = 'Valid 10-digit mobile number is required.';
+    }
+    if (empEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(empEmail.trim())) {
+      errs.empEmail = 'Please enter a valid email address.';
+    }
+    if (!backendJoiningDate) {
+      errs.joiningDate = 'Please select worker Joining Date.';
+    }
+    if (!bloodGroup) {
+      errs.bloodGroup = 'Please select Blood Group.';
+    }
+    if (!password.trim() || password.trim().length < 9) {
+      errs.password = 'Initial password must be at least 9 characters.';
+    }
 
-    if (!validationResult.success) {
-      const fieldErrors: Record<string, string> = {};
-      let firstMessage = 'Please fill all required fields correctly.';
-      validationResult.error.errors.forEach((err, idx) => {
-        const path = err.path[0] as string;
-        if (path) {
-          fieldErrors[path] = err.message;
-          if (idx === 0) firstMessage = err.message;
-        }
-      });
-
-      setErrors(fieldErrors);
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
       setAlertConfig({
         visible: true,
-        title: 'Validation Error',
-        message: firstMessage,
+        title: 'Step 1 Incomplete',
+        message: Object.values(errs)[0],
+        type: 'warning',
+      });
+      return false;
+    }
+    setErrors({});
+    return true;
+  };
+
+  // Step 2 Validation: Photo & KYC Documents
+  const validateStep2 = () => {
+    // Photos & KYC can be verified or optional, but if validation is needed it can be enforced here
+    setErrors({});
+    return true;
+  };
+
+  // Step 3 Validation & Final Submit: Deployment to Unit
+  const handleRegisterEmployee = async () => {
+    const errs: Record<string, string> = {};
+    if (!selectedUnitCode.trim()) {
+      errs.selectedUnitCode = 'Please select a Site Unit for deployment.';
+    }
+    if (!selectedRole.trim()) {
+      errs.selectedRole = 'Please assign a Designation / Role.';
+    }
+    if (!deptCode.trim()) {
+      errs.deptCode = 'Please select a Department.';
+    }
+
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      setAlertConfig({
+        visible: true,
+        title: 'Step 3 Incomplete',
+        message: Object.values(errs)[0],
         type: 'warning',
       });
       return;
@@ -407,7 +757,6 @@ export const AddStaffScreen: React.FC = () => {
     setErrors({});
     setSubmitting(true);
     try {
-      const today = new Date().toISOString().split('T')[0];
       const selectedUnitObj = unitsList.find((u) => u.unit_code === selectedUnitCode);
 
       // 1. Resolve Employee Code
@@ -470,18 +819,18 @@ export const AddStaffScreen: React.FC = () => {
         designation_code: selectedRole.trim(),
         role: selectedRole.trim(),
         client_code: selectedUnitObj?.client_code || 'CL01',
-        dept_code: deptCode || 'OPERATIONS',
+        dept_code: deptCode.trim(),
         employee_type: employeeType,
         reporting_to: currentUser?.empCode || currentUser?.username || '',
         gender: gender === 'Female' ? 'F' : 'M',
         birth_date: backendDob || '1995-01-01',
-        joining_date: today,
+        joining_date: backendJoiningDate,
         location: selectedUnitObj?.state_name || state || 'Maharashtra',
         location_city: selectedUnitObj?.unit_city || city || 'Mumbai',
         emp_nationality: 'Indian',
         emp_current_state: selectedUnitObj?.state_name || state || 'Maharashtra',
         emp_current_city: selectedUnitObj?.unit_city || city || 'Mumbai',
-        emp_blood_group: 'B+',
+        emp_blood_group: bloodGroup,
         password: finalPassword,
       };
 
@@ -613,413 +962,723 @@ export const AddStaffScreen: React.FC = () => {
           </View>
         ) : (
           <>
-            {/* Auto-allocated ID Badge */}
+            {/* Hero Allocated ID Banner */}
             {nextEmpCode ? (
-              <View style={styles.empCodeBadge}>
-                <AppIcon name="id-card" size={16} color="#0F766E" />
-                <Text style={styles.empCodeBadgeText}>
-                  Next Allocated ID: {nextEmpCode}
-                </Text>
+              <View style={styles.heroBanner}>
+                <View style={styles.heroLeft}>
+                  <Text style={styles.heroSubtitle}>System Allocated Identifier</Text>
+                  <View style={styles.heroTitleRow}>
+                    <AppIcon name="id-card" size={20} color="#FFFFFF" />
+                    <Text style={styles.heroEmpCodeText}>{nextEmpCode}</Text>
+                  </View>
+                </View>
+                <View style={styles.heroBadge}>
+                  <Text style={styles.heroBadgeText}>Next ID</Text>
+                </View>
               </View>
             ) : null}
 
-            {/* 1. Worker Photo & Documents Verification */}
-            <View style={styles.formCard}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                <Text style={styles.sectionTitle}>Verification & KYC Documents</Text>
-                <View style={styles.optionalBadge}>
-                  <Text style={styles.optionalBadgeText}>Web Master</Text>
-                </View>
-              </View>
-              <Text style={styles.sectionSubtitle}>
-                Attach profile photo and mandatory verification documents for Web Portal & App
-              </Text>
-
-              {/* A. Worker Passport Photo */}
-              <View style={styles.photoContainer}>
+            {/* Step Indicator Progress Bar (Wizard Style) */}
+            <View style={styles.stepIndicatorRow}>
+              {/* Step 1: Identity */}
+              <TouchableOpacity
+                style={styles.stepItem}
+                activeOpacity={0.8}
+                onPress={() => setCurrentStep(1)}
+              >
                 <View
                   style={[
-                    styles.photoAvatarWrap,
-                    workerPhoto ? styles.photoAvatarWrapReady : null,
+                    styles.stepBadge,
+                    currentStep === 1 && styles.stepBadgeActive,
+                    currentStep > 1 && styles.stepBadgeDone,
                   ]}
                 >
-                  {workerPhoto ? (
-                    <Image
-                      source={{ uri: workerPhoto.uri }}
-                      style={styles.photoImage}
-                      resizeMode="cover"
-                    />
+                  {currentStep > 1 ? (
+                    <AppIcon name="check" size={13} color="#FFFFFF" />
                   ) : (
-                    <AppIcon name="camera" size={32} color="#94A3B8" />
+                    <Text
+                      style={[
+                        styles.stepBadgeText,
+                        currentStep === 1 && styles.stepBadgeTextActive,
+                      ]}
+                    >
+                      1
+                    </Text>
                   )}
                 </View>
-
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#0F172A', marginBottom: 2 }}>
-                  Worker Profile Photo (Passport Size)
+                <Text
+                  style={[
+                    styles.stepLabel,
+                    currentStep === 1 && styles.stepLabelActive,
+                  ]}
+                >
+                  Personal
                 </Text>
+              </TouchableOpacity>
 
-                <View style={styles.photoButtonsRow}>
-                  <TouchableOpacity
-                    style={styles.photoSmallBtn}
-                    onPress={() => handleCaptureCamera('photo')}
-                    activeOpacity={0.8}
-                  >
-                    <AppIcon name="camera" size={14} color="#0F766E" />
-                    <Text style={styles.photoSmallBtnText}>Take Photo</Text>
-                  </TouchableOpacity>
+              <View style={[styles.stepLine, currentStep > 1 && styles.stepLineActive]} />
 
-                  <TouchableOpacity
-                    style={styles.photoSmallBtn}
-                    onPress={() => handlePickGallery('photo')}
-                    activeOpacity={0.8}
+              {/* Step 2: KYC & Photo */}
+              <TouchableOpacity
+                style={styles.stepItem}
+                activeOpacity={0.8}
+                onPress={() => {
+                  if (validateStep1()) setCurrentStep(2);
+                }}
+              >
+                <View
+                  style={[
+                    styles.stepBadge,
+                    currentStep === 2 && styles.stepBadgeActive,
+                    currentStep > 2 && styles.stepBadgeDone,
+                  ]}
+                >
+                  {currentStep > 2 ? (
+                    <AppIcon name="check" size={13} color="#FFFFFF" />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.stepBadgeText,
+                        currentStep === 2 && styles.stepBadgeTextActive,
+                      ]}
+                    >
+                      2
+                    </Text>
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.stepLabel,
+                    currentStep === 2 && styles.stepLabelActive,
+                  ]}
+                >
+                  KYC & Docs
+                </Text>
+              </TouchableOpacity>
+
+              <View style={[styles.stepLine, currentStep > 2 && styles.stepLineActive]} />
+
+              {/* Step 3: Deployment */}
+              <TouchableOpacity
+                style={styles.stepItem}
+                activeOpacity={0.8}
+                onPress={() => {
+                  if (validateStep1() && validateStep2()) setCurrentStep(3);
+                }}
+              >
+                <View
+                  style={[
+                    styles.stepBadge,
+                    currentStep === 3 && styles.stepBadgeActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.stepBadgeText,
+                      currentStep === 3 && styles.stepBadgeTextActive,
+                    ]}
                   >
-                    <AppIcon name="image" size={14} color="#0F766E" />
-                    <Text style={styles.photoSmallBtnText}>Gallery</Text>
-                  </TouchableOpacity>
+                    3
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.stepLabel,
+                    currentStep === 3 && styles.stepLabelActive,
+                  ]}
+                >
+                  Deploy
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* STEP 1: PERSONAL & CONTACT INFORMATION */}
+            {currentStep === 1 && (
+              <View style={styles.formCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardIconBox}>
+                    <AppIcon name="person" size={18} color="#0F766E" />
+                  </View>
+                  <View style={styles.cardHeaderTextWrap}>
+                    <Text style={styles.sectionTitle}>Personnel Identity & Details</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Full legal name, contact numbers and credentials
+                    </Text>
+                  </View>
                 </View>
 
-                {workerPhoto ? (
+                <AppTextInput
+                  label="Full Name *"
+                  placeholder="e.g. Ramesh Kumar"
+                  value={empName}
+                  onChangeText={(v) => {
+                    setEmpName(v);
+                    if (errors.empName) setErrors((prev) => ({ ...prev, empName: '' }));
+                  }}
+                  iconLeft="person"
+                  error={errors.empName}
+                />
+
+                <AppTextInput
+                  label="Father / Guardian Name"
+                  placeholder="e.g. Suresh Kumar"
+                  value={empFatherName}
+                  onChangeText={setEmpFatherName}
+                />
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => setShowDatePicker(true)}
+                >
+                  <View pointerEvents="none">
+                    <AppTextInput
+                      label="Date of Birth"
+                      placeholder="Select Date of Birth (DD/MM/YYYY)"
+                      value={dob}
+                      editable={false}
+                      iconLeft="calendar"
+                      error={errors.dob}
+                    />
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => setShowJoiningDatePicker(true)}
+                >
+                  <View pointerEvents="none">
+                    <AppTextInput
+                      label="Joining Date *"
+                      placeholder="Select Joining Date (DD/MM/YYYY)"
+                      value={joiningDate}
+                      editable={false}
+                      iconLeft="calendar"
+                      error={errors.joiningDate}
+                    />
+                  </View>
+                </TouchableOpacity>
+
+                <AppTextInput
+                  label="Mobile Number *"
+                  placeholder="10-digit mobile number"
+                  value={empMobile}
+                  onChangeText={(v) => {
+                    const clean = v.replace(/\D/g, '').slice(0, 10);
+                    setEmpMobile(clean);
+                    if (errors.empMobile) setErrors((prev) => ({ ...prev, empMobile: '' }));
+                  }}
+                  keyboardType="phone-pad"
+                  maxLength={10}
+                  iconLeft="phone"
+                  error={errors.empMobile}
+                />
+
+                <AppTextInput
+                  label="Email Address"
+                  placeholder="worker@example.com (for sending credentials)"
+                  value={empEmail}
+                  onChangeText={(v) => {
+                    setEmpEmail(v);
+                    if (errors.empEmail) setErrors((prev) => ({ ...prev, empEmail: '' }));
+                  }}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  iconLeft="mail"
+                  error={errors.empEmail}
+                />
+
+                {/* Checkbox to Mail Credentials */}
+                <TouchableOpacity
+                  style={[styles.checkboxRow, sendCredentialsEmail && styles.checkboxRowActive]}
+                  onPress={() => setSendCredentialsEmail((prev) => !prev)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.checkboxBox, sendCredentialsEmail && styles.checkboxBoxActive]}>
+                    {sendCredentialsEmail ? <AppIcon name="check" size={12} color="#FFFFFF" /> : null}
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={styles.checkboxLabel}>Send Login ID & Password to Email</Text>
+                    <Text style={styles.checkboxHint}>
+                      Worker will receive their User ID and Password via email upon creation
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+
+                {/* Gender Segmented Selection */}
+                <Text style={styles.inputLabel}>Gender</Text>
+                <View style={styles.genderContainer}>
                   <TouchableOpacity
-                    style={styles.removePhotoBtn}
-                    onPress={() => setWorkerPhoto(null)}
+                    style={[styles.genderBtn, gender === 'Male' && styles.genderBtnActive]}
+                    onPress={() => setGender('Male')}
                     activeOpacity={0.7}
                   >
-                    <Text style={styles.removePhotoBtnText}>✕ Remove Photo</Text>
+                    <Text style={[styles.genderBtnText, gender === 'Male' && styles.genderBtnTextActive]}>
+                      Male
+                    </Text>
                   </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.genderBtn, gender === 'Female' && styles.genderBtnActive]}
+                    onPress={() => setGender('Female')}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.genderBtnText, gender === 'Female' && styles.genderBtnTextActive]}>
+                      Female
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {/* Blood Group Selection */}
+                <Text style={styles.dropdownLabel}>Blood Group *</Text>
+                {errors.bloodGroup ? (
+                  <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4, fontWeight: '600' }}>
+                    {errors.bloodGroup}
+                  </Text>
                 ) : null}
-
-                <Text style={styles.photoHelperText}>
-                  {workerPhoto
-                    ? '✓ Profile photo attached (will be displayed on mobile profile & website)'
-                    : 'Tap to capture worker profile photo or choose from gallery'}
-                </Text>
-              </View>
-
-              {/* B. Aadhaar Card Row */}
-              <View style={styles.docRowCard}>
-                <View style={[styles.docThumbnailWrap, aadharDoc ? styles.docThumbnailWrapReady : null]}>
-                  {aadharDoc ? (
-                    <Image source={{ uri: aadharDoc.uri }} style={styles.docThumbImage} resizeMode="cover" />
-                  ) : (
-                    <AppIcon name="id-card" size={24} color="#94A3B8" />
-                  )}
-                </View>
-                <View style={styles.docInfoCol}>
-                  <View style={styles.docTitleRow}>
-                    <Text style={styles.docTitleText}>Aadhaar Card</Text>
-                    {aadharDoc ? (
-                      <Text style={{ fontSize: 11, color: '#0F766E', fontWeight: '700' }}>✓ Attached</Text>
-                    ) : null}
-                  </View>
-                  <Text style={styles.docSubtitleText}>
-                    {aadharDoc ? aadharDoc.name : 'Attach original Aadhaar Card document'}
-                  </Text>
-                  <View style={styles.docActionsRow}>
-                    <TouchableOpacity
-                      style={[styles.docActionBtn, aadharDoc && styles.docActionBtnActive]}
-                      onPress={() => handleCaptureCamera('aadhar')}
-                      activeOpacity={0.8}
-                    >
-                      <AppIcon name="camera" size={12} color="#0F766E" />
-                      <Text style={styles.docActionBtnText}>Camera</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.docActionBtn, aadharDoc && styles.docActionBtnActive]}
-                      onPress={() => handlePickGallery('aadhar')}
-                      activeOpacity={0.8}
-                    >
-                      <AppIcon name="image" size={12} color="#0F766E" />
-                      <Text style={styles.docActionBtnText}>Gallery</Text>
-                    </TouchableOpacity>
-                    {aadharDoc ? (
-                      <TouchableOpacity
-                        style={styles.docRemoveBtn}
-                        onPress={() => setAadharDoc(null)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.docRemoveBtnText}>Remove</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                </View>
-              </View>
-
-              {/* C. PAN Card Row */}
-              <View style={styles.docRowCard}>
-                <View style={[styles.docThumbnailWrap, panDoc ? styles.docThumbnailWrapReady : null]}>
-                  {panDoc ? (
-                    <Image source={{ uri: panDoc.uri }} style={styles.docThumbImage} resizeMode="cover" />
-                  ) : (
-                    <AppIcon name="document" size={24} color="#94A3B8" />
-                  )}
-                </View>
-                <View style={styles.docInfoCol}>
-                  <View style={styles.docTitleRow}>
-                    <Text style={styles.docTitleText}>PAN Card</Text>
-                    {panDoc ? (
-                      <Text style={{ fontSize: 11, color: '#0F766E', fontWeight: '700' }}>✓ Attached</Text>
-                    ) : null}
-                  </View>
-                  <Text style={styles.docSubtitleText}>
-                    {panDoc ? panDoc.name : 'Attach original PAN Card document'}
-                  </Text>
-                  <View style={styles.docActionsRow}>
-                    <TouchableOpacity
-                      style={[styles.docActionBtn, panDoc && styles.docActionBtnActive]}
-                      onPress={() => handleCaptureCamera('pan')}
-                      activeOpacity={0.8}
-                    >
-                      <AppIcon name="camera" size={12} color="#0F766E" />
-                      <Text style={styles.docActionBtnText}>Camera</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.docActionBtn, panDoc && styles.docActionBtnActive]}
-                      onPress={() => handlePickGallery('pan')}
-                      activeOpacity={0.8}
-                    >
-                      <AppIcon name="image" size={12} color="#0F766E" />
-                      <Text style={styles.docActionBtnText}>Gallery</Text>
-                    </TouchableOpacity>
-                    {panDoc ? (
-                      <TouchableOpacity
-                        style={styles.docRemoveBtn}
-                        onPress={() => setPanDoc(null)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.docRemoveBtnText}>Remove</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* 2. Basic Identity */}
-            <View style={styles.formCard}>
-              <Text style={styles.sectionTitle}>Personnel Identity</Text>
-              <Text style={styles.sectionSubtitle}>
-                Worker name, mobile contact and credentials
-              </Text>
-
-              <AppTextInput
-                label="Full Name *"
-                placeholder="e.g. Ramesh Kumar"
-                value={empName}
-                onChangeText={(v) => {
-                  setEmpName(v);
-                  if (errors.empName) setErrors((prev) => ({ ...prev, empName: '' }));
-                }}
-                iconLeft="person"
-                error={errors.empName}
-              />
-
-              <AppTextInput
-                label="Father / Guardian Name"
-                placeholder="e.g. Suresh Kumar"
-                value={empFatherName}
-                onChangeText={setEmpFatherName}
-              />
-
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <View pointerEvents="none">
-                  <AppTextInput
-                    label="Date of Birth"
-                    placeholder="Select Date of Birth (DD/MM/YYYY)"
-                    value={dob}
-                    editable={false}
-                    iconLeft="calendar"
-                    error={errors.dob}
-                  />
-                </View>
-              </TouchableOpacity>
-
-              <AppTextInput
-                label="Mobile Number *"
-                placeholder="10-digit mobile number"
-                value={empMobile}
-                onChangeText={(v) => {
-                  // Only allow numeric digits and stop strictly at 10 digits
-                  const clean = v.replace(/\D/g, '').slice(0, 10);
-                  setEmpMobile(clean);
-                  if (errors.empMobile) setErrors((prev) => ({ ...prev, empMobile: '' }));
-                }}
-                keyboardType="phone-pad"
-                maxLength={10}
-                iconLeft="phone"
-                error={errors.empMobile}
-              />
-
-              <AppTextInput
-                label="Email Address"
-                placeholder="worker@example.com (for sending credentials)"
-                value={empEmail}
-                onChangeText={(v) => {
-                  setEmpEmail(v);
-                  if (errors.empEmail) setErrors((prev) => ({ ...prev, empEmail: '' }));
-                }}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                iconLeft="mail"
-                error={errors.empEmail}
-              />
-
-              {/* Checkbox to Mail Credentials */}
-              <TouchableOpacity
-                style={[styles.checkboxRow, sendCredentialsEmail && styles.checkboxRowActive]}
-                onPress={() => setSendCredentialsEmail((prev) => !prev)}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.checkboxBox, sendCredentialsEmail && styles.checkboxBoxActive]}>
-                  {sendCredentialsEmail ? <AppIcon name="check" size={12} color="#FFFFFF" /> : null}
-                </View>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={styles.checkboxLabel}>Send Login ID & Password to Email</Text>
-                  <Text style={styles.checkboxHint}>
-                    Worker will receive their User ID and Password via email upon creation
-                  </Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Gender Selection */}
-              <Text style={styles.dropdownLabel}>Gender</Text>
-              <View style={styles.genderRow}>
-                <TouchableOpacity
-                  style={[styles.genderBtn, gender === 'Male' && styles.genderBtnActive]}
-                  onPress={() => setGender('Male')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.genderBtnText, gender === 'Male' && styles.genderBtnTextActive]}>
-                    Male
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.genderBtn, gender === 'Female' && styles.genderBtnActive]}
-                  onPress={() => setGender('Female')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.genderBtnText, gender === 'Female' && styles.genderBtnTextActive]}>
-                    Female
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <AppTextInput
-                label="Initial Password *"
-                placeholder="Min 9 chars (e.g. Staff@1234)"
-                value={password}
-                onChangeText={(v) => {
-                  setPassword(v);
-                  if (errors.password) setErrors((prev) => ({ ...prev, password: '' }));
-                }}
-                isPassword
-                iconLeft="lock"
-                error={errors.password}
-                helperText="Worker login password (min 9 characters, e.g. Staff@1234)"
-              />
-              <PasswordStrengthMeter password={password} minChars={9} />
-            </View>
-
-            {/* 3. Site Unit & Role Assignment */}
-            <View style={styles.formCard}>
-              <Text style={styles.sectionTitle}>Deployment & Role</Text>
-              <Text style={styles.sectionSubtitle}>
-                Select the physical Site Unit and assigned Role
-              </Text>
-
-              {/* Unit Selector Chips */}
-              <Text style={styles.dropdownLabel}>Deploy to Site Unit *</Text>
-              {errors.selectedUnitCode ? (
-                <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4, fontWeight: '600' }}>
-                  {errors.selectedUnitCode}
-                </Text>
-              ) : null}
-              {unitsList.length === 0 ? (
-                <Text style={{ color: '#EF4444', fontSize: 12, marginBottom: 8 }}>
-                  No active units found. Please create a Site Unit first.
-                </Text>
-              ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={[styles.chipsScroll, { marginBottom: 12 }]}>
                   <View style={styles.chipsRow}>
-                    {unitsList.map((u) => {
-                      const isSel = selectedUnitCode === u.unit_code;
+                    {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'].map((bg) => {
+                      const isSel = bloodGroup === bg;
                       return (
                         <TouchableOpacity
-                          key={u.id}
+                          key={bg}
                           style={[styles.selectChip, isSel && styles.selectChipActive]}
                           onPress={() => {
-                            setSelectedUnitCode(u.unit_code);
-                            if (errors.selectedUnitCode) setErrors((prev) => ({ ...prev, selectedUnitCode: '' }));
-                            if (u.unit_city) setCity(u.unit_city);
-                            if (u.state_name) setState(u.state_name);
+                            setBloodGroup(bg);
+                            if (errors.bloodGroup) setErrors((prev) => ({ ...prev, bloodGroup: '' }));
                           }}
                           activeOpacity={0.75}
                         >
                           <Text style={[styles.selectChipText, isSel && styles.selectChipTextActive]}>
-                            {u.unit_name} ({u.unit_code})
+                            {bg}
                           </Text>
                         </TouchableOpacity>
                       );
                     })}
                   </View>
                 </ScrollView>
-              )}
 
-              {/* Role Selector Chips */}
-              <Text style={[styles.dropdownLabel, { marginTop: 12 }]}>Assign Role / Designation *</Text>
-              {errors.selectedRole ? (
-                <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4, fontWeight: '600' }}>
-                  {errors.selectedRole}
-                </Text>
-              ) : null}
-              {rolesList.length === 0 ? (
-                <Text style={{ color: '#EF4444', fontSize: 12, marginBottom: 8 }}>
-                  No roles found. Please create a role in Create Role first.
-                </Text>
-              ) : (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
-                  <View style={styles.chipsRow}>
-                    {rolesList.map((r, idx) => {
-                      const isSel = selectedRole === r;
-                      return (
-                        <TouchableOpacity
-                          key={idx}
-                          style={[styles.selectChip, isSel && styles.selectChipActive]}
-                          onPress={() => {
-                            setSelectedRole(r);
-                            if (errors.selectedRole) setErrors((prev) => ({ ...prev, selectedRole: '' }));
-                          }}
-                          activeOpacity={0.75}
-                        >
-                          <Text style={[styles.selectChipText, isSel && styles.selectChipTextActive]}>
-                            {r}
-                          </Text>
-                        </TouchableOpacity>
-                      );
-                    })}
+                <AppTextInput
+                  label="Initial Password *"
+                  placeholder="Min 9 chars (e.g. Staff@1234)"
+                  value={password}
+                  onChangeText={(v) => {
+                    setPassword(v);
+                    if (errors.password) setErrors((prev) => ({ ...prev, password: '' }));
+                  }}
+                  isPassword
+                  iconLeft="lock"
+                  error={errors.password}
+                  helperText="Worker login password (min 9 characters, e.g. Staff@1234)"
+                />
+                <PasswordStrengthMeter password={password} minChars={9} />
+              </View>
+            )}
+
+            {/* STEP 2: WORKER PHOTO & KYC DOCUMENTS */}
+            {currentStep === 2 && (
+              <View style={styles.formCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardIconBox}>
+                    <AppIcon name="shield" size={18} color="#0F766E" />
                   </View>
-                </ScrollView>
-              )}
-
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <AppTextInput label="City" value={city} onChangeText={setCity} />
+                  <View style={styles.cardHeaderTextWrap}>
+                    <Text style={styles.sectionTitle}>Verification & KYC Documents</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Passport photo and identity credentials
+                    </Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <AppTextInput label="State" value={state} onChangeText={setState} />
+
+                {/* A. Worker Passport Photo Avatar */}
+                <View style={styles.photoSection}>
+                  <View
+                    style={[
+                      styles.photoAvatarWrap,
+                      workerPhoto ? styles.photoAvatarWrapReady : null,
+                    ]}
+                  >
+                    {workerPhoto ? (
+                      <Image
+                        source={{ uri: workerPhoto.uri }}
+                        style={styles.photoImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <AppIcon name="camera" size={32} color="#94A3B8" />
+                    )}
+                  </View>
+
+                  <Text style={styles.photoLabel}>Passport Size Photo</Text>
+                  <Text style={styles.photoHelperText}>
+                    {workerPhoto
+                      ? '✓ Profile photo ready for worker profile'
+                      : 'Capture live camera snapshot or upload from gallery'}
+                  </Text>
+
+                  <View style={styles.photoButtonsRow}>
+                    <TouchableOpacity
+                      style={[styles.photoActionBtn, workerPhoto && styles.photoActionBtnActive]}
+                      onPress={() => handleCaptureCamera('photo')}
+                      activeOpacity={0.8}
+                    >
+                      <AppIcon name="camera" size={14} color="#0F766E" />
+                      <Text style={styles.photoActionBtnText}>Camera</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.photoActionBtn, workerPhoto && styles.photoActionBtnActive]}
+                      onPress={() => handlePickGallery('photo')}
+                      activeOpacity={0.8}
+                    >
+                      <AppIcon name="image" size={14} color="#0F766E" />
+                      <Text style={styles.photoActionBtnText}>Gallery</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {workerPhoto ? (
+                    <TouchableOpacity
+                      style={styles.removePhotoBtn}
+                      onPress={() => setWorkerPhoto(null)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.removePhotoBtnText}>✕ Remove Photo</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+
+                {/* B. Aadhaar Card Row */}
+                <View style={styles.docRowCard}>
+                  <View style={[styles.docThumbnailWrap, aadharDoc ? styles.docThumbnailWrapReady : null]}>
+                    {aadharDoc ? (
+                      <Image source={{ uri: aadharDoc.uri }} style={styles.docThumbImage} resizeMode="cover" />
+                    ) : (
+                      <AppIcon name="id-card" size={24} color="#94A3B8" />
+                    )}
+                  </View>
+                  <View style={styles.docInfoCol}>
+                    <View style={styles.docTitleRow}>
+                      <Text style={styles.docTitleText}>Aadhaar Card</Text>
+                      {aadharDoc ? (
+                        <View style={styles.docBadgeReady}>
+                          <Text style={styles.docBadgeReadyText}>✓ Attached</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.docSubtitleText} numberOfLines={1}>
+                      {aadharDoc ? aadharDoc.name : 'Upload front/scan of Aadhaar'}
+                    </Text>
+                    <View style={styles.docActionsRow}>
+                      <TouchableOpacity
+                        style={[styles.docActionBtn, aadharDoc && styles.docActionBtnActive]}
+                        onPress={() => handleCaptureCamera('aadhar')}
+                        activeOpacity={0.8}
+                      >
+                        <AppIcon name="camera" size={11} color="#0F766E" />
+                        <Text style={styles.docActionBtnText}>Camera</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.docActionBtn, aadharDoc && styles.docActionBtnActive]}
+                        onPress={() => handlePickGallery('aadhar')}
+                        activeOpacity={0.8}
+                      >
+                        <AppIcon name="image" size={11} color="#0F766E" />
+                        <Text style={styles.docActionBtnText}>Gallery</Text>
+                      </TouchableOpacity>
+                      {aadharDoc ? (
+                        <TouchableOpacity
+                          style={styles.docRemoveBtn}
+                          onPress={() => setAadharDoc(null)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.docRemoveBtnText}>Remove</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+                </View>
+
+                {/* C. PAN Card Row */}
+                <View style={styles.docRowCard}>
+                  <View style={[styles.docThumbnailWrap, panDoc ? styles.docThumbnailWrapReady : null]}>
+                    {panDoc ? (
+                      <Image source={{ uri: panDoc.uri }} style={styles.docThumbImage} resizeMode="cover" />
+                    ) : (
+                      <AppIcon name="document" size={24} color="#94A3B8" />
+                    )}
+                  </View>
+                  <View style={styles.docInfoCol}>
+                    <View style={styles.docTitleRow}>
+                      <Text style={styles.docTitleText}>PAN Card</Text>
+                      {panDoc ? (
+                        <View style={styles.docBadgeReady}>
+                          <Text style={styles.docBadgeReadyText}>✓ Attached</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.docSubtitleText} numberOfLines={1}>
+                      {panDoc ? panDoc.name : 'Upload front/scan of PAN'}
+                    </Text>
+                    <View style={styles.docActionsRow}>
+                      <TouchableOpacity
+                        style={[styles.docActionBtn, panDoc && styles.docActionBtnActive]}
+                        onPress={() => handleCaptureCamera('pan')}
+                        activeOpacity={0.8}
+                      >
+                        <AppIcon name="camera" size={11} color="#0F766E" />
+                        <Text style={styles.docActionBtnText}>Camera</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.docActionBtn, panDoc && styles.docActionBtnActive]}
+                        onPress={() => handlePickGallery('pan')}
+                        activeOpacity={0.8}
+                      >
+                        <AppIcon name="image" size={11} color="#0F766E" />
+                        <Text style={styles.docActionBtnText}>Gallery</Text>
+                      </TouchableOpacity>
+                      {panDoc ? (
+                        <TouchableOpacity
+                          style={styles.docRemoveBtn}
+                          onPress={() => setPanDoc(null)}
+                          activeOpacity={0.7}
+                        >
+                          <Text style={styles.docRemoveBtnText}>Remove</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
                 </View>
               </View>
-            </View>
+            )}
 
-            {/* Submit Button */}
-            <AppButton
-              title={submitting ? 'Registering Worker...' : 'Deploy Worker to Unit'}
-              onPress={handleRegisterEmployee}
-              loading={submitting}
-              style={styles.submitBtn}
-            />
+            {/* STEP 3: SITE UNIT & ROLE DEPLOYMENT */}
+            {currentStep === 3 && (
+              <View style={styles.formCard}>
+                <View style={styles.cardHeader}>
+                  <View style={styles.cardIconBox}>
+                    <AppIcon name="pin" size={18} color="#0F766E" />
+                  </View>
+                  <View style={styles.cardHeaderTextWrap}>
+                    <Text style={styles.sectionTitle}>Deployment & Assignment</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Site Unit, Designation, Department and Location
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Unit Selector Chips */}
+                <Text style={styles.dropdownLabel}>Deploy to Site Unit *</Text>
+                {errors.selectedUnitCode ? (
+                  <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4, fontWeight: '600' }}>
+                    {errors.selectedUnitCode}
+                  </Text>
+                ) : null}
+                {unitsList.length === 0 ? (
+                  <Text style={{ color: '#EF4444', fontSize: 12, marginBottom: 8 }}>
+                    No active units found. Please create a Site Unit first.
+                  </Text>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+                    <View style={styles.chipsRow}>
+                      {unitsList.map((u) => {
+                        const isSel = selectedUnitCode === u.unit_code;
+                        return (
+                          <TouchableOpacity
+                            key={u.id}
+                            style={[styles.selectChip, isSel && styles.selectChipActive]}
+                            onPress={() => {
+                              setSelectedUnitCode(u.unit_code);
+                              if (errors.selectedUnitCode) setErrors((prev) => ({ ...prev, selectedUnitCode: '' }));
+                              if (u.unit_city) setCity(u.unit_city);
+                              if (u.state_name) setState(u.state_name);
+                            }}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={[styles.selectChipText, isSel && styles.selectChipTextActive]}>
+                              {u.unit_name} ({u.unit_code})
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                )}
+
+                {/* Role Selector Chips */}
+                <Text style={[styles.dropdownLabel, { marginTop: 12 }]}>Assign Role / Designation *</Text>
+                {errors.selectedRole ? (
+                  <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4, fontWeight: '600' }}>
+                    {errors.selectedRole}
+                  </Text>
+                ) : null}
+                {rolesList.length === 0 ? (
+                  <Text style={{ color: '#EF4444', fontSize: 12, marginBottom: 8 }}>
+                    No roles found. Please create a role in Create Role first.
+                  </Text>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+                    <View style={styles.chipsRow}>
+                      {rolesList.map((r, idx) => {
+                        const isSel = selectedRole === r;
+                        return (
+                          <TouchableOpacity
+                            key={idx}
+                            style={[styles.selectChip, isSel && styles.selectChipActive]}
+                            onPress={() => {
+                              setSelectedRole(r);
+                              if (errors.selectedRole) setErrors((prev) => ({ ...prev, selectedRole: '' }));
+                            }}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={[styles.selectChipText, isSel && styles.selectChipTextActive]}>
+                              {r}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                )}
+
+                {/* Department Selector Chips */}
+                <Text style={[styles.dropdownLabel, { marginTop: 12 }]}>Department *</Text>
+                {errors.deptCode ? (
+                  <Text style={{ color: '#EF4444', fontSize: 11, marginBottom: 4, fontWeight: '600' }}>
+                    {errors.deptCode}
+                  </Text>
+                ) : null}
+                {departmentsList.length === 0 ? (
+                  <Text style={{ color: '#EF4444', fontSize: 12, marginBottom: 8 }}>
+                    No departments found. Please create a department first.
+                  </Text>
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll}>
+                    <View style={styles.chipsRow}>
+                      {departmentsList.map((d, idx) => {
+                        const isSel = deptCode === d.dept_code;
+                        return (
+                          <TouchableOpacity
+                            key={`${d.dept_code}-${idx}`}
+                            style={[styles.selectChip, isSel && styles.selectChipActive]}
+                            onPress={() => {
+                              setDeptCode(d.dept_code);
+                              if (errors.deptCode) setErrors((prev) => ({ ...prev, deptCode: '' }));
+                            }}
+                            activeOpacity={0.75}
+                          >
+                            <Text style={[styles.selectChipText, isSel && styles.selectChipTextActive]}>
+                              {d.dept_name === d.dept_code ? d.dept_name : `${d.dept_name} (${d.dept_code})`}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                )}
+
+                {/* State & City Dropdown Selectors */}
+                <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+                  {/* State Dropdown Selector */}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.pickerLabel}>State</Text>
+                    <TouchableOpacity
+                      style={styles.selectorBox}
+                      activeOpacity={0.75}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        setStatePickerVisible(true);
+                        if (availableStates.length === 0) fetchStates();
+                      }}
+                    >
+                      <Text
+                        style={state ? styles.selectorBoxText : styles.selectorBoxPlaceholder}
+                        numberOfLines={1}
+                      >
+                        {state || 'Select State'}
+                      </Text>
+                      <AppIcon name="chevron-down" size={14} color="#64748B" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* City Dropdown Selector */}
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.pickerLabel}>City</Text>
+                    <TouchableOpacity
+                      style={styles.selectorBox}
+                      activeOpacity={0.75}
+                      onPress={() => {
+                        Keyboard.dismiss();
+                        if (!state.trim()) {
+                          showToast({
+                            type: 'warning',
+                            title: 'Select State First',
+                            message: 'Please choose a State before selecting City.',
+                          });
+                          return;
+                        }
+                        setCitySearch('');
+                        setCityPickerVisible(true);
+                        fetchCitiesForState(state);
+                      }}
+                    >
+                      <Text
+                        style={city ? styles.selectorBoxText : styles.selectorBoxPlaceholder}
+                        numberOfLines={1}
+                      >
+                        {city || 'Select City'}
+                      </Text>
+                      <AppIcon name="chevron-down" size={14} color="#64748B" />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            {/* Wizard Navigation Button Row (Back & Next / Submit) */}
+            <View style={styles.buttonRow}>
+              {currentStep > 1 && (
+                <TouchableOpacity
+                  style={styles.prevButton}
+                  activeOpacity={0.8}
+                  onPress={() => setCurrentStep((prev) => (prev - 1) as any)}
+                >
+                  <AppIcon name="arrow-back" size={16} color="#475569" />
+                  <Text style={styles.prevButtonText}>Back</Text>
+                </TouchableOpacity>
+              )}
+
+              {currentStep < 3 ? (
+                <TouchableOpacity
+                  style={styles.nextButton}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    if (currentStep === 1 && validateStep1()) {
+                      setCurrentStep(2);
+                    } else if (currentStep === 2 && validateStep2()) {
+                      setCurrentStep(3);
+                    }
+                  }}
+                >
+                  <Text style={styles.nextButtonText}>Next Step</Text>
+                  <AppIcon name="arrow-forward" size={16} color="#FFFFFF" />
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.nextButton, { backgroundColor: '#0F766E' }]}
+                  activeOpacity={0.8}
+                  onPress={handleRegisterEmployee}
+                  disabled={submitting}
+                >
+                  {submitting ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <>
+                      <Text style={styles.nextButtonText}>Deploy Worker</Text>
+                      <AppIcon name="check" size={16} color="#FFFFFF" />
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
           </>
         )}
       </ScrollView>
@@ -1060,6 +1719,201 @@ export const AddStaffScreen: React.FC = () => {
           if (errors.dob) setErrors((prev) => ({ ...prev, dob: '' }));
         }}
       />
+
+      {/* Date Picker Modal for Joining Date Selection */}
+      <DatePickerModal
+        visible={showJoiningDatePicker}
+        title="Select Joining Date"
+        initialDate={backendJoiningDate || new Date().toISOString().split('T')[0]}
+        maxYear={new Date().getFullYear() + 1}
+        minYear={2000}
+        onClose={() => setShowJoiningDatePicker(false)}
+        onSelect={(formatted, date) => {
+          setJoiningDate(formatted);
+          const yyyy = date.getFullYear();
+          const mm = String(date.getMonth() + 1).padStart(2, '0');
+          const dd = String(date.getDate()).padStart(2, '0');
+          setBackendJoiningDate(`${yyyy}-${mm}-${dd}`);
+          if (errors.joiningDate) setErrors((prev) => ({ ...prev, joiningDate: '' }));
+        }}
+      />
+
+      {/* State Picker Modal */}
+      <Modal
+        visible={statePickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setStatePickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setStatePickerVisible(false)}
+          />
+          <View style={[styles.pickerSheetContent, { paddingBottom: bottomInset + 10 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select State</Text>
+              <TouchableOpacity
+                style={styles.modalCloseBtn}
+                onPress={() => setStatePickerVisible(false)}
+              >
+                <AppIcon name="close" size={16} color="#0F766E" />
+              </TouchableOpacity>
+            </View>
+
+            <AppTextInput
+              placeholder="Search state..."
+              value={stateSearch}
+              onChangeText={setStateSearch}
+              iconLeft="search"
+              containerStyle={{ marginBottom: 10 }}
+            />
+
+            {loadingStates ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#0F766E" />
+              </View>
+            ) : (
+              <FlatList
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: bottomInset + 30 }}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+                initialNumToRender={15}
+                maxToRenderPerBatch={15}
+                windowSize={5}
+                removeClippedSubviews={Platform.OS === 'android'}
+                data={filteredStates}
+                keyExtractor={(item, idx) => `${item.sName}-${idx}`}
+                renderItem={({ item }) => {
+                  const isSelected = state.toLowerCase() === item.sName.toLowerCase();
+                  return (
+                    <TouchableOpacity
+                      style={[styles.pickerItem, isSelected ? styles.pickerItemActive : null]}
+                      onPress={() => {
+                        if (state.toLowerCase() !== item.sName.toLowerCase()) {
+                          setCity('');
+                          setAvailableCities([]);
+                        }
+                        setState(item.sName);
+                        setStatePickerVisible(false);
+                        fetchCitiesForState(item.sName);
+                      }}
+                    >
+                      <Text style={styles.pickerItemText}>{item.sName}</Text>
+                      {isSelected ? <AppIcon name="check" size={16} color="#0F766E" /> : null}
+                    </TouchableOpacity>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={{ padding: 20, alignItems: 'center' }}>
+                    <Text style={{ color: '#64748B', fontSize: 12 }}>No states found.</Text>
+                  </View>
+                }
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* City Picker Modal (SQL-driven filtered by selected state) */}
+      <Modal
+        visible={cityPickerVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setCityPickerVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setCityPickerVisible(false)}
+          />
+          <View style={[styles.pickerSheetContent, { paddingBottom: bottomInset + 10 }]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select City ({state})</Text>
+              <TouchableOpacity
+                style={styles.modalCloseBtn}
+                onPress={() => setCityPickerVisible(false)}
+              >
+                <AppIcon name="close" size={16} color="#0F766E" />
+              </TouchableOpacity>
+            </View>
+
+            <AppTextInput
+              placeholder="Search city..."
+              value={citySearch}
+              onChangeText={setCitySearch}
+              iconLeft="search"
+              containerStyle={{ marginBottom: 10 }}
+            />
+
+            {loadingCities && availableCities.length === 0 ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#0F766E" />
+              </View>
+            ) : (
+              <FlatList
+                style={{ flex: 1 }}
+                contentContainerStyle={{ paddingBottom: bottomInset + 30 }}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled={true}
+                showsVerticalScrollIndicator={true}
+                initialNumToRender={15}
+                maxToRenderPerBatch={15}
+                windowSize={5}
+                removeClippedSubviews={Platform.OS === 'android'}
+                data={filteredCities}
+                keyExtractor={(item, idx) => `${item}-${idx}`}
+                renderItem={({ item }) => {
+                  const isSelected = city.toLowerCase() === item.toLowerCase();
+                  return (
+                    <TouchableOpacity
+                      style={[styles.pickerItem, isSelected ? styles.pickerItemActive : null]}
+                      onPress={() => {
+                        setCity(item);
+                        setCityPickerVisible(false);
+                      }}
+                    >
+                      <Text style={styles.pickerItemText}>{item}</Text>
+                      {isSelected ? <AppIcon name="check" size={16} color="#0F766E" /> : null}
+                    </TouchableOpacity>
+                  );
+                }}
+                ListEmptyComponent={
+                  <View style={{ padding: 20, alignItems: 'center', gap: 10 }}>
+                    <Text style={{ color: '#64748B', fontSize: 12, textAlign: 'center' }}>
+                      {citySearch.trim()
+                        ? `No city matched "${citySearch.trim()}".`
+                        : `No cities found for ${state}.`}
+                    </Text>
+                    {citySearch.trim() ? (
+                      <TouchableOpacity
+                        style={{
+                          backgroundColor: '#0F766E',
+                          paddingHorizontal: 14,
+                          paddingVertical: 8,
+                          borderRadius: 8,
+                        }}
+                        onPress={() => {
+                          setCity(citySearch.trim());
+                          setCityPickerVisible(false);
+                        }}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+                          Use "{citySearch.trim()}"
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                }
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </AppScreenContainer>
   );
 };

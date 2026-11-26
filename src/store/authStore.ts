@@ -1,10 +1,13 @@
+import { NativeModules, Platform } from 'react-native';
 import { create } from './createStore';
 import { User, RoleCode } from '../types/models';
 import { showToast } from './toastStore';
 import * as Keychain from 'react-native-keychain';
-import { authApi, apiClient } from '../api';
+import { authApi, apiClient, staffApi } from '../api';
 import { ANDROID_API_KEY } from '../api/config';
 import { useNotificationStore } from './notificationStore';
+import { useSuperAdminStore } from './superAdminStore';
+import { useShiftTrackingStore } from './shiftTrackingStore';
 
 export interface AuthState {
   currentUser: User | null;
@@ -126,6 +129,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               let employeeEmail = `${u.username.toLowerCase()}@ihmsindia.com`;
               let employeeJoiningDate = sessionData.user.joiningDate || '';
               let employeeAvatarUrl = sessionData.user.avatarUrl || '';
+              let employeeCompanyName = sessionData.user.companyName || (sessionData.user.scope as any)?.comp_name || '';
 
               if (!isCompanyAdmin) {
                 // 1. Mobile GetUserDetails
@@ -142,9 +146,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                       if (uData.EMP_MOBILE_NO) employeeMobile = uData.EMP_MOBILE_NO;
                       if (uData.UNIT_NAME) employeeUnit = uData.UNIT_NAME;
                       if (uData.JOINING_DATE) employeeJoiningDate = uData.JOINING_DATE;
-                      if (uData.DEPT_CODE && (String(uData.DEPT_CODE).includes('.') || String(uData.DEPT_CODE).startsWith('http'))) {
-                        const pStr = String(uData.DEPT_CODE).trim();
-                        employeeAvatarUrl = pStr.startsWith('http') ? pStr : `/media/documents/${pStr.replace(/^\/+/, '')}`;
+                      if (uData.COMP_NAME && uData.COMP_NAME.trim()) employeeCompanyName = uData.COMP_NAME.trim();
+                      if (!employeeAvatarUrl) {
+                        const rawPhoto = (
+                          uData.EMP_PHOTO ||
+                          uData.PHOTO ||
+                          uData.IMAGE ||
+                          ((String(uData.DEPT_CODE).includes('.') || String(uData.DEPT_CODE).startsWith('http')) ? uData.DEPT_CODE : '')
+                        );
+                        if (rawPhoto && String(rawPhoto).trim()) {
+                          const src = apiClient.getImageSource(String(rawPhoto).trim());
+                          if (src?.uri) employeeAvatarUrl = src.uri;
+                        }
                       }
                     }
                   }
@@ -170,9 +183,44 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                       if (desig) {
                         employeeDesignation = desig;
                       }
+                      if (!employeeAvatarUrl) {
+                        const hrPhoto = match.photo || match.emp_photo || match.image || match.profile_image || '';
+                        if (hrPhoto && String(hrPhoto).trim()) {
+                          const src = apiClient.getImageSource(String(hrPhoto).trim());
+                          if (src?.uri) employeeAvatarUrl = src.uri;
+                        }
+                      }
                     }
                   }
                 } catch {}
+
+                // 3. Fallback to Documents Status for authentic passport photo
+                if (!employeeAvatarUrl) {
+                  try {
+                    const docRes = await staffApi.getDocumentsStatus(u.username);
+                    if (docRes.success && docRes.data) {
+                      const dList: any[] = Array.isArray(docRes.data.results)
+                        ? docRes.data.results
+                        : Array.isArray(docRes.data)
+                        ? docRes.data
+                        : [];
+                      const photoDoc = dList.find((d: any) => {
+                        const key = String(d.image_name || d.document_type || d.image_raw || '').toLowerCase();
+                        return (
+                          key.includes('photo') ||
+                          key.includes('passport') ||
+                          key === 'passprt_size_photo' ||
+                          key === 'employee_photo_upload'
+                        ) && (d.file_url || d.image_path || d.image_url || d.file);
+                      });
+                      if (photoDoc) {
+                        const pPath = photoDoc.file_url || photoDoc.image_path || photoDoc.image_url || photoDoc.file;
+                        const src = apiClient.getImageSource(pPath);
+                        if (src?.uri) employeeAvatarUrl = src.uri;
+                      }
+                    }
+                  } catch {}
+                }
 
                 // 3. Attendance Logs / Muster Sheet fallback for authentic employee name
                 if (!employeeName || employeeName === u.username) {
@@ -253,14 +301,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                   }))
                 : [];
 
+              const targetComp = String(u.scope?.comp_code || sessionData.user.companyId || '').trim();
+              if (!employeeCompanyName && targetComp) {
+                try {
+                  const cRes = await apiClient.get<any>(`/api/masters/companies/?search=${encodeURIComponent(targetComp)}`);
+                  if (cRes.success && cRes.data) {
+                    const cList = Array.isArray(cRes.data) ? cRes.data : cRes.data.results || [];
+                    const matchedComp = cList.find((c: any) => String(c.comp_code || '').trim().toUpperCase() === targetComp.toUpperCase());
+                    if (matchedComp) {
+                      employeeCompanyName = matchedComp.company_name || matchedComp.company_short_name || matchedComp.comp_name || '';
+                    }
+                  }
+                } catch {}
+              }
+
+              if (employeeCompanyName) {
+                resolvedScope = {
+                  ...resolvedScope,
+                  comp_name: employeeCompanyName,
+                  company_name: employeeCompanyName,
+                };
+              }
+              useSuperAdminStore.getState().fetchLiveCompanies().catch(() => {});
+
               const updatedUser: User = {
                 ...sessionData.user,
                 name: employeeName,
                 role: userRole,
+                companyId: sessionData.user.companyId || u.scope?.comp_code || null,
+                companyName: employeeCompanyName || sessionData.user.companyName,
                 designation: employeeDesignation,
                 branchOrUnit: employeeUnit,
                 joiningDate: employeeJoiningDate || sessionData.user.joiningDate,
-                avatarUrl: employeeAvatarUrl || sessionData.user.avatarUrl,
+                avatarUrl: sessionData.user.avatarUrl || employeeAvatarUrl,
                 assignedUnitLatitude: parsedUnitLat ?? sessionData.user.assignedUnitLatitude,
                 assignedUnitLongitude: parsedUnitLon ?? sessionData.user.assignedUnitLongitude,
                 backendRole: backendRoleName,
@@ -344,6 +417,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         let employeeUnit = u.scope?.unit_name || u.scope?.unit_code || (u.is_staff ? 'Central Administration' : 'Not Assigned');
         let employeeJoiningDate = '';
         let employeeAvatarUrl = '';
+        let employeeCompanyName = '';
 
         if (!isCompanyAdmin) {
           // 1. Mobile GetUserDetails
@@ -360,9 +434,16 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 if (uData.EMP_MOBILE_NO) employeeMobile = uData.EMP_MOBILE_NO;
                 if (uData.UNIT_NAME) employeeUnit = uData.UNIT_NAME;
                 if (uData.JOINING_DATE) employeeJoiningDate = uData.JOINING_DATE;
-                if (uData.DEPT_CODE && (String(uData.DEPT_CODE).includes('.') || String(uData.DEPT_CODE).startsWith('http'))) {
-                  const pStr = String(uData.DEPT_CODE).trim();
-                  employeeAvatarUrl = pStr.startsWith('http') ? pStr : `/media/documents/${pStr.replace(/^\/+/, '')}`;
+                if (uData.COMP_NAME && uData.COMP_NAME.trim()) employeeCompanyName = uData.COMP_NAME.trim();
+                const rawPhoto = (
+                  uData.EMP_PHOTO ||
+                  uData.PHOTO ||
+                  uData.IMAGE ||
+                  ((String(uData.DEPT_CODE).includes('.') || String(uData.DEPT_CODE).startsWith('http')) ? uData.DEPT_CODE : '')
+                );
+                if (rawPhoto && String(rawPhoto).trim()) {
+                  const src = apiClient.getImageSource(String(rawPhoto).trim());
+                  if (src?.uri) employeeAvatarUrl = src.uri;
                 }
               }
             }
@@ -388,9 +469,82 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                 if (desig) {
                   employeeDesignation = desig;
                 }
+                if (!employeeAvatarUrl) {
+                  const hrPhoto = match.photo || match.emp_photo || match.image || match.profile_image || '';
+                  if (hrPhoto && String(hrPhoto).trim()) {
+                    const src = apiClient.getImageSource(String(hrPhoto).trim());
+                    if (src?.uri) employeeAvatarUrl = src.uri;
+                  }
+                }
               }
             }
           } catch {}
+
+          // 3. Documents Status for authentic passport photo (Check both hr_employee_document & legacy android_documents)
+          if (!employeeAvatarUrl) {
+            try {
+              // 3a. Primary modern endpoint (used by Web Portal: /api/hr/employee-documents/)
+              const modernDocRes = await staffApi.getEmployeeDocuments(u.username);
+              if (modernDocRes.success && modernDocRes.data) {
+                const mList: any[] = Array.isArray(modernDocRes.data.results)
+                  ? modernDocRes.data.results
+                  : Array.isArray(modernDocRes.data)
+                  ? modernDocRes.data
+                  : [];
+                const photoDoc = mList.find((d: any) => {
+                  const key = String(d.document_type || d.image_name || '').toLowerCase();
+                  return (
+                    key.includes('photo') ||
+                    key.includes('passport')
+                  ) && (d.file || d.file_url || d.image_path || d.image_url);
+                });
+                if (photoDoc) {
+                  const pPath = photoDoc.file || photoDoc.file_url || photoDoc.image_path || photoDoc.image_url;
+                  const src = apiClient.getImageSource(pPath);
+                  if (src?.uri) employeeAvatarUrl = src.uri;
+                }
+              }
+
+              // 3b. Fallback to legacy android documents if modern doc didn't have photo
+              if (!employeeAvatarUrl) {
+                const docRes = await staffApi.getDocumentsStatus(u.username);
+                if (docRes.success && docRes.data) {
+                  const dList: any[] = Array.isArray(docRes.data.results)
+                    ? docRes.data.results
+                    : Array.isArray(docRes.data)
+                    ? docRes.data
+                    : [];
+                  const photoDoc = dList.find((d: any) => {
+                    const key = String(d.image_name || d.document_type || d.image_raw || '').toLowerCase();
+                    return (
+                      key.includes('photo') ||
+                      key.includes('passport') ||
+                      key === 'passprt_size_photo' ||
+                      key === 'employee_photo_upload'
+                    ) && (d.file_url || d.image_path || d.image_url || d.file);
+                  });
+                  if (photoDoc) {
+                    const pPath = photoDoc.file_url || photoDoc.image_path || photoDoc.image_url || photoDoc.file;
+                    const src = apiClient.getImageSource(pPath);
+                    if (src?.uri) employeeAvatarUrl = src.uri;
+                  }
+                }
+              }
+
+              // 3c. Direct deterministic fallback for verified web portal uploads:
+              // Modern uploads land in: /media/employee_documents/<comp_code>/<emp_code>/photo.jpg
+              if (!employeeAvatarUrl && u.username) {
+                const cCode = String(u.scope?.comp_code || (companyCode ? companyCode.trim().toUpperCase() : '') || '').trim();
+                if (cCode) {
+                  const fallbackPhotoPath = `/media/employee_documents/${cCode}/${u.username}/photo.jpg`;
+                  const src = apiClient.getImageSource(fallbackPhotoPath);
+                  if (src?.uri) {
+                    employeeAvatarUrl = src.uri;
+                  }
+                }
+              }
+            } catch {}
+          }
 
           // 3. Attendance Logs / Muster Sheet fallback for authentic employee name
           if (!employeeName || employeeName === u.username) {
@@ -473,6 +627,37 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             }))
           : [];
 
+        const targetComp = String(u.scope?.comp_code || (companyCode ? companyCode.trim().toUpperCase() : '') || '').trim();
+        if (!employeeCompanyName && targetComp) {
+          try {
+            // Check superAdminStore company cache first
+            const cachedCompany = useSuperAdminStore.getState().companies.find(
+              (c) => c.code.toUpperCase() === targetComp.toUpperCase() || c.id.toUpperCase() === targetComp.toUpperCase()
+            );
+            if (cachedCompany?.name) {
+              employeeCompanyName = cachedCompany.name;
+            } else {
+              const cRes = await apiClient.get<any>(`/api/masters/companies/?search=${encodeURIComponent(targetComp)}`);
+              if (cRes.success && cRes.data) {
+                const cList = Array.isArray(cRes.data) ? cRes.data : cRes.data.results || [];
+                const matchedComp = cList.find((c: any) => String(c.comp_code || '').trim().toUpperCase() === targetComp.toUpperCase());
+                if (matchedComp) {
+                  employeeCompanyName = matchedComp.company_name || matchedComp.company_short_name || matchedComp.comp_name || '';
+                }
+              }
+            }
+          } catch {}
+        }
+
+        if (employeeCompanyName) {
+          resolvedScope = {
+            ...resolvedScope,
+            comp_name: employeeCompanyName,
+            company_name: employeeCompanyName,
+          };
+        }
+        useSuperAdminStore.getState().fetchLiveCompanies().catch(() => {});
+
         const backendUser: User = {
           id: u.username,
           name: employeeName,
@@ -480,7 +665,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           email: employeeEmail,
           empCode: u.legacy_login_id || u.username,
           role: userRole,
-          companyId: u.scope?.comp_code || (companyCode ? companyCode.trim().toUpperCase() : null),
+          companyId: targetComp || null,
+          companyName: employeeCompanyName || undefined,
           designation: employeeDesignation,
           phone: employeeMobile,
           branchOrUnit: employeeUnit,
@@ -537,6 +723,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: () => {
+    // Stop background shift GPS tracking immediately on logout
+    useShiftTrackingStore.getState().setShiftActive(false);
+    if (Platform.OS === 'android') {
+      NativeModules.LiveLocationModule?.stopTracking?.().catch?.(() => {});
+    }
+
     // Notify live backend
     authApi.logout().catch(() => { });
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   PermissionsAndroid,
+  StyleSheet,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 
@@ -33,6 +34,48 @@ import { showToast } from '../../../store/toastStore';
 import { useAuthStore } from '../../../store/authStore';
 
 let cachedUnits: BackendUnit[] | null = null;
+let cachedClients: BackendClientItem[] | null = null;
+let cachedStates: BackendStateItem[] | null = null;
+const cachedCitiesByState: Record<string, string[]> = {};
+
+const ALL_INDIAN_STATES: string[] = [
+  'Andaman and Nicobar Islands',
+  'Andhra Pradesh',
+  'Arunachal Pradesh',
+  'Assam',
+  'Bihar',
+  'Chandigarh',
+  'Chhattisgarh',
+  'Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi',
+  'Goa',
+  'Gujarat',
+  'Haryana',
+  'Himachal Pradesh',
+  'Jammu and Kashmir',
+  'Jharkhand',
+  'Karnataka',
+  'Kerala',
+  'Ladakh',
+  'Lakshadweep',
+  'Madhya Pradesh',
+  'Maharashtra',
+  'Manipur',
+  'Meghalaya',
+  'Mizoram',
+  'Nagaland',
+  'Odisha',
+  'Puducherry',
+  'Punjab',
+  'Rajasthan',
+  'Sikkim',
+  'Tamil Nadu',
+  'Telangana',
+  'Tripura',
+  'Uttar Pradesh',
+  'Uttarakhand',
+  'West Bengal',
+];
 
 export const SiteUnitsScreen: React.FC = () => {
   const { goBack } = useNavigation();
@@ -58,6 +101,7 @@ export const SiteUnitsScreen: React.FC = () => {
   const [unitCity, setUnitCity] = useState('');
   const [stateName, setStateName] = useState('');
   const [pincode, setPincode] = useState('');
+  const [fileNo, setFileNo] = useState('');
   const [lat, setLat] = useState('');
   const [lon, setLon] = useState('');
   const [radiusMeters, setRadiusMeters] = useState('100');
@@ -65,16 +109,22 @@ export const SiteUnitsScreen: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
-  // Clients & States dynamic lookup lists
-  const [availableClients, setAvailableClients] = useState<BackendClientItem[]>([]);
+  // Clients & States dynamic lookup lists (initialized from in-memory cache)
+  const [availableClients, setAvailableClients] = useState<BackendClientItem[]>(cachedClients || []);
   const [loadingClients, setLoadingClients] = useState(false);
   const [clientPickerVisible, setClientPickerVisible] = useState(false);
   const [clientSearch, setClientSearch] = useState('');
 
-  const [availableStates, setAvailableStates] = useState<BackendStateItem[]>([]);
+  const [availableStates, setAvailableStates] = useState<BackendStateItem[]>(cachedStates || []);
   const [loadingStates, setLoadingStates] = useState(false);
   const [statePickerVisible, setStatePickerVisible] = useState(false);
   const [stateSearch, setStateSearch] = useState('');
+
+  const [availableCities, setAvailableCities] = useState<string[]>([]);
+  const [loadingCities, setLoadingCities] = useState(false);
+  const [cityPickerVisible, setCityPickerVisible] = useState(false);
+  const [citySearch, setCitySearch] = useState('');
+  const inFlightCityRef = useRef<string | null>(null);
 
   useEffect(() => {
     const showSub = Keyboard.addListener(
@@ -121,14 +171,52 @@ export const SiteUnitsScreen: React.FC = () => {
   });
   const mapWebViewRef = React.useRef<any>(null);
 
-  const fetchUnits = async () => {
+  /**
+   * Performance & Diagnostics Profiler for Site Units APIs
+   */
+  async function timedSiteUnitsApi<T>(name: string, fn: () => Promise<T>): Promise<T> {
+    const t0 = Date.now();
     try {
-      const res = await superadminApi.getUnits();
+      const res: any = await fn();
+      const cost = Date.now() - t0;
+      let detail = '';
+      if (res?.success && res?.data) {
+        const list = Array.isArray(res.data) ? res.data : res.data?.results;
+        if (Array.isArray(list)) {
+          detail = ` | Fetched ${list.length} records`;
+        } else if (typeof res.data === 'object') {
+          detail = ' | OK';
+        }
+      } else if (res && !res.success) {
+        detail = ` | Failed: ${res.error || 'Unknown error'}`;
+      }
+      console.log(`[SiteUnits API] ⏱️ ${name} -> ${cost}ms${detail}`);
+      return res;
+    } catch (err) {
+      const cost = Date.now() - t0;
+      console.warn(`[SiteUnits API] ❌ ${name} failed after ${cost}ms:`, err);
+      throw err;
+    }
+  }
+
+  const fetchUnits = async (isForce: boolean = false) => {
+    if (!isForce && cachedUnits) {
+      setUnits(cachedUnits);
+      setLoading(false);
+      setRefreshing(false);
+      console.log('[SiteUnits] Cache Hit: 0 APIs called (0ms)');
+      return;
+    }
+
+    const tStart = Date.now();
+    try {
+      const res = await timedSiteUnitsApi('Units Master (GET /api/masters/units/)', () => superadminApi.getUnits());
       if (res.success && res.data) {
         const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
         cachedUnits = list;
         setUnits(list);
       }
+      console.log(`[SiteUnits] Sync: 1 API in ~${Date.now() - tStart}ms`);
     } catch (e) {
       console.warn('[SiteUnits] fetch error:', e);
     } finally {
@@ -137,12 +225,17 @@ export const SiteUnitsScreen: React.FC = () => {
     }
   };
 
-  const fetchClients = async () => {
+  const fetchClients = async (isForce: boolean = false) => {
+    if (!isForce && cachedClients) {
+      setAvailableClients(cachedClients);
+      return;
+    }
     setLoadingClients(true);
     try {
-      const res = await superadminApi.getClients();
+      const res = await timedSiteUnitsApi('Clients Master (GET /api/masters/clients/)', () => superadminApi.getClients());
       if (res.success && res.data) {
         const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        cachedClients = list;
         setAvailableClients(list);
       }
     } catch (e) {
@@ -152,12 +245,17 @@ export const SiteUnitsScreen: React.FC = () => {
     }
   };
 
-  const fetchStates = async () => {
+  const fetchStates = async (isForce: boolean = false) => {
+    if (!isForce && cachedStates) {
+      setAvailableStates(cachedStates);
+      return;
+    }
     setLoadingStates(true);
     try {
-      const res = await superadminApi.getStates();
+      const res = await timedSiteUnitsApi('States Master (GET /api/masters/states/)', () => superadminApi.getStates());
       if (res.success && res.data) {
         const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        cachedStates = list;
         setAvailableStates(list);
       }
     } catch (e) {
@@ -167,15 +265,96 @@ export const SiteUnitsScreen: React.FC = () => {
     }
   };
 
+  const fetchCitiesForState = async (targetState: string, isForce: boolean = false) => {
+    const cleanTarget = targetState.trim().toLowerCase();
+    if (!cleanTarget) {
+      setAvailableCities([]);
+      return;
+    }
+
+    // 1. Instant in-memory cache hit per state (0ms, 0 APIs)
+    if (!isForce && cachedCitiesByState[cleanTarget]) {
+      setAvailableCities(cachedCitiesByState[cleanTarget]);
+      return;
+    }
+
+    // 2. Deduplicate concurrent requests for the same state
+    if (inFlightCityRef.current === cleanTarget) {
+      return;
+    }
+
+    const extractCities = (rows: any[]) => {
+      const map = new Map<string, string>();
+      rows.forEach((r: any) => {
+        const rowState = String(
+          r.state_name || r.STATE_NAME || r.name || r.state || r.stateName || ''
+        ).trim().toLowerCase();
+        const rawCity = String(
+          r.city || r.CITY || r.city_name || r.CITY_NAME || r.district || r.district_name || r.town || r.location || ''
+        ).trim();
+        if (
+          rawCity &&
+          (!rowState || rowState === cleanTarget || rowState.includes(cleanTarget) || cleanTarget.includes(rowState)) &&
+          !map.has(rawCity.toLowerCase())
+        ) {
+          map.set(rawCity.toLowerCase(), rawCity);
+        }
+      });
+      return Array.from(map.values()).sort((a, b) => a.localeCompare(b));
+    };
+
+    // Show already-loaded cities immediately if available
+    const initialCities = extractCities(availableStates);
+    if (initialCities.length > 0) {
+      setAvailableCities(initialCities);
+    }
+
+    inFlightCityRef.current = cleanTarget;
+    setLoadingCities(true);
+    try {
+      const res = await timedSiteUnitsApi(`Cities for ${targetState} (GET /api/masters/states/)`, () =>
+        superadminApi.getStates(targetState, 100, 1)
+      );
+      if (res.success && res.data) {
+        let allRows = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
+        const totalCount = typeof (res.data as any)?.count === 'number' ? (res.data as any).count : allRows.length;
+
+        // If this state has more than 100 cities, fetch remaining pages in parallel
+        if ((res.data as any)?.next && totalCount > allRows.length && totalCount <= 1000) {
+          const totalPages = Math.ceil(totalCount / 100);
+          const pagePromises = [];
+          for (let p = 2; p <= totalPages; p++) {
+            pagePromises.push(superadminApi.getStates(targetState, 100, p));
+          }
+          const extraResults = await Promise.allSettled(pagePromises);
+          extraResults.forEach((r) => {
+            if (r.status === 'fulfilled' && r.value.success && r.value.data) {
+              const extraList = Array.isArray(r.value.data) ? r.value.data : (r.value.data as any).results || [];
+              allRows = [...allRows, ...extraList];
+            }
+          });
+        }
+
+        const merged = extractCities([...availableStates, ...allRows]);
+        cachedCitiesByState[cleanTarget] = merged;
+        setAvailableCities(merged);
+      }
+    } catch (e) {
+      console.warn('[SiteUnits] fetch cities error:', e);
+    } finally {
+      inFlightCityRef.current = null;
+      setLoadingCities(false);
+    }
+  };
+
   useEffect(() => {
-    fetchUnits();
-    fetchClients();
-    fetchStates();
+    // Lazy-load only Units on screen mount; Clients & States load on demand when "+ Add Unit" is tapped
+    fetchUnits(false);
   }, []);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchUnits();
+    fetchUnits(true);
   };
 
   const handleOpenShifts = async (unit: BackendUnit) => {
@@ -183,7 +362,9 @@ export const SiteUnitsScreen: React.FC = () => {
     setShiftsModalVisible(true);
     setLoadingShifts(true);
     try {
-      const res = await superadminApi.getShifts(unit.unit_code);
+      const res = await timedSiteUnitsApi(`Shifts for Unit ${unit.unit_code} (GET /api/masters/shifts/)`, () =>
+        superadminApi.getShifts(unit.unit_code)
+      );
       if (res.success && res.data) {
         const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
         setUnitShifts(list);
@@ -210,12 +391,14 @@ export const SiteUnitsScreen: React.FC = () => {
 
     setSavingShift(true);
     try {
-      const res = await superadminApi.createShift({
-        unit_code: selectedUnitForShifts.unit_code,
-        shift_name: newShiftName.trim(),
-        shift_from: newShiftFrom.trim(),
-        shift_to: newShiftTo.trim(),
-      });
+      const res = await timedSiteUnitsApi(`Create Shift for ${selectedUnitForShifts.unit_code} (POST /api/masters/shifts/)`, () =>
+        superadminApi.createShift({
+          unit_code: selectedUnitForShifts.unit_code,
+          shift_name: newShiftName.trim(),
+          shift_from: newShiftFrom.trim(),
+          shift_to: newShiftTo.trim(),
+        })
+      );
 
       if (res.success) {
         showToast({
@@ -225,7 +408,9 @@ export const SiteUnitsScreen: React.FC = () => {
         });
         setNewShiftName('');
         // Refresh shift list
-        const refreshed = await superadminApi.getShifts(selectedUnitForShifts.unit_code);
+        const refreshed = await timedSiteUnitsApi(`Refresh Shifts for ${selectedUnitForShifts.unit_code} (GET /api/masters/shifts/)`, () =>
+          superadminApi.getShifts(selectedUnitForShifts.unit_code)
+        );
         if (refreshed.success && refreshed.data) {
           const list = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data as any).results || [];
           setUnitShifts(list);
@@ -278,12 +463,14 @@ export const SiteUnitsScreen: React.FC = () => {
 
     setUpdatingGps(true);
     try {
-      const res = await superadminApi.updateUnit(selectedUnitForGps.id, {
-        unit_lattitude: cleanLat,
-        unit_longtitude: cleanLon,
-        area_meters: cleanRadius,
-        reason_for_updation: cleanReason,
-      });
+      const res = await timedSiteUnitsApi(`Update Geofence Coordinates for ${selectedUnitForGps.unit_code} (PUT/PATCH /api/masters/units/)`, () =>
+        superadminApi.updateUnit(selectedUnitForGps.id, {
+          unit_lattitude: cleanLat,
+          unit_longtitude: cleanLon,
+          area_meters: cleanRadius,
+          reason_for_updation: cleanReason,
+        })
+      );
 
       if (res.success) {
         showToast({
@@ -292,7 +479,7 @@ export const SiteUnitsScreen: React.FC = () => {
           message: `${selectedUnitForGps.unit_name} (${selectedUnitForGps.unit_code}) coordinates updated successfully.`,
         });
         setEditGpsModalVisible(false);
-        fetchUnits();
+        fetchUnits(true);
       } else {
         showToast({
           type: 'error',
@@ -499,6 +686,9 @@ export const SiteUnitsScreen: React.FC = () => {
     if (!pincode.trim() || pincode.trim().length !== 6 || isNaN(Number(pincode.trim()))) {
       errs.pincode = 'Valid 6-digit Pincode is required';
     }
+    if (!fileNo.trim() || fileNo.trim() === '0') {
+      errs.fileNo = 'File Number is required';
+    }
     if (!lat.trim()) errs.lat = 'Latitude is required';
     if (!lon.trim()) errs.lon = 'Longitude is required';
 
@@ -518,21 +708,23 @@ export const SiteUnitsScreen: React.FC = () => {
       // If client is not selected, fallback seamlessly to company code or 'GENERAL' so backend doesn't reject.
       const resolvedClientCode = clientCode.trim() || compCode.trim() || 'GENERAL';
 
-      const res = await superadminApi.createUnit({
-        comp_code: compCode.trim().toUpperCase(),
-        client_code: resolvedClientCode.toUpperCase(),
-        unit_code: unitCode.trim().toUpperCase(),
-        unit_name: unitName.trim(),
-        unit_add1: unitAdd1.trim() || `${unitName.trim()} Premises`,
-        unit_add2: unitAdd2.trim() || `${unitCity.trim()} Site Location`,
-        unit_city: unitCity.trim(),
-        state_name: stateName.trim(),
-        pincode: pincode.trim(),
-        file_no: '101',
-        area_meters: radiusMeters.trim() || '150',
-        unit_lattitude: lat.trim(),
-        unit_longtitude: lon.trim(),
-      });
+      const res = await timedSiteUnitsApi(`Create Site Unit (POST /api/masters/units/)`, () =>
+        superadminApi.createUnit({
+          comp_code: compCode.trim().toUpperCase(),
+          client_code: resolvedClientCode.toUpperCase(),
+          unit_code: unitCode.trim().toUpperCase(),
+          unit_name: unitName.trim(),
+          unit_add1: unitAdd1.trim() || `${unitName.trim()} Premises`,
+          unit_add2: unitAdd2.trim() || `${unitCity.trim()} Site Location`,
+          unit_city: unitCity.trim(),
+          state_name: stateName.trim(),
+          pincode: pincode.trim(),
+          file_no: fileNo.trim(),
+          area_meters: radiusMeters.trim() || '150',
+          unit_lattitude: lat.trim(),
+          unit_longtitude: lon.trim(),
+        })
+      );
 
       if (res.success) {
         showToast({
@@ -547,10 +739,11 @@ export const SiteUnitsScreen: React.FC = () => {
         setUnitAdd2('');
         setUnitCity('');
         setPincode('');
+        setFileNo('');
         setLat('');
         setLon('');
         setErrors({});
-        fetchUnits();
+        fetchUnits(true);
       } else {
         showToast({
           type: 'error',
@@ -569,16 +762,53 @@ export const SiteUnitsScreen: React.FC = () => {
     }
   };
 
-  const filteredUnits = units.filter((u) => {
+  const filteredUnits = useMemo(() => {
     const q = searchQuery.toLowerCase().trim();
-    if (!q) return true;
-    return (
+    if (!q) return units;
+    return units.filter((u) => (
       (u.unit_name && u.unit_name.toLowerCase().includes(q)) ||
       (u.unit_code && u.unit_code.toLowerCase().includes(q)) ||
       (u.comp_code && u.comp_code.toLowerCase().includes(q)) ||
       (u.state_name && u.state_name.toLowerCase().includes(q))
-    );
-  });
+    ));
+  }, [units, searchQuery]);
+
+  const filteredClients = useMemo(() => {
+    const q = clientSearch.toLowerCase().trim();
+    if (!q) return availableClients;
+    return availableClients.filter((c) => (
+      c.client_name?.toLowerCase().includes(q) ||
+      c.client_code?.toLowerCase().includes(q)
+    ));
+  }, [availableClients, clientSearch]);
+
+  const sortedUniqueStates = useMemo(() => {
+    const map = new Map<string, { sName: string; item: any }>();
+    availableStates.forEach((s: any) => {
+      const name = String(s.state_name || s.name || s.state || s.stateName || '').trim();
+      if (name && !map.has(name.toLowerCase())) {
+        map.set(name.toLowerCase(), { sName: name, item: s });
+      }
+    });
+    ALL_INDIAN_STATES.forEach((st) => {
+      if (!map.has(st.toLowerCase())) {
+        map.set(st.toLowerCase(), { sName: st, item: { state_name: st } });
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => a.sName.localeCompare(b.sName));
+  }, [availableStates]);
+
+  const filteredStates = useMemo(() => {
+    const q = stateSearch.toLowerCase().trim();
+    if (!q) return sortedUniqueStates;
+    return sortedUniqueStates.filter((u) => u.sName.toLowerCase().includes(q));
+  }, [sortedUniqueStates, stateSearch]);
+
+  const filteredCities = useMemo(() => {
+    const q = citySearch.toLowerCase().trim();
+    if (!q) return availableCities;
+    return availableCities.filter((c) => c.toLowerCase().includes(q));
+  }, [availableCities, citySearch]);
 
   const renderUnitCard = ({ item }: { item: BackendUnit }) => {
     // Backend Unit model uses unit_lattitude & unit_longtitude
@@ -678,7 +908,11 @@ export const SiteUnitsScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.addSiteBtn}
               activeOpacity={0.8}
-              onPress={() => setModalVisible(true)}
+              onPress={() => {
+                setModalVisible(true);
+                if (!cachedClients) fetchClients(false);
+                if (!cachedStates) fetchStates(false);
+              }}
             >
               <AppIcon name="plus" size={12} color="#FFFFFF" />
               <Text style={styles.addSiteBtnText}>Add Unit</Text>
@@ -717,6 +951,10 @@ export const SiteUnitsScreen: React.FC = () => {
             data={filteredUnits}
             keyExtractor={(item, index) => `${item.unit_code}-${index}`}
             renderItem={renderUnitCard}
+            initialNumToRender={15}
+            maxToRenderPerBatch={15}
+            windowSize={5}
+            removeClippedSubviews={Platform.OS === 'android'}
             contentContainerStyle={{ paddingBottom: bottomInset + 120 }}
             showsVerticalScrollIndicator={false}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
@@ -760,7 +998,9 @@ export const SiteUnitsScreen: React.FC = () => {
               <Text style={styles.pickerLabel}>Client (Optional)</Text>
               <TouchableOpacity
                 style={styles.selectorBox}
+                activeOpacity={0.8}
                 onPress={() => {
+                  Keyboard.dismiss();
                   setClientPickerVisible(true);
                   if (availableClients.length === 0) fetchClients();
                 }}
@@ -795,33 +1035,62 @@ export const SiteUnitsScreen: React.FC = () => {
                 error={errors.unitName}
               />
 
-              {/* State Selection */}
-              <AppTextInput
-                label="Branch State *"
-                placeholder="e.g. Maharashtra"
-                value={stateName}
-                onChangeText={(v) => {
-                  setStateName(v);
-                  if (errors.stateName) setErrors((prev) => ({ ...prev, stateName: '' }));
+              {/* State Selection (Dropdown) */}
+              <Text style={styles.pickerLabel}>Branch State *</Text>
+              <TouchableOpacity
+                style={[
+                  styles.selectorBox,
+                  errors.stateName ? styles.selectorBoxError : null,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setStatePickerVisible(true);
+                  if (availableStates.length === 0) fetchStates();
                 }}
-                iconLeft="map-pin"
-                error={errors.stateName}
-              />
+              >
+                <Text style={stateName ? styles.selectorBoxText : styles.selectorBoxPlaceholder}>
+                  {stateName || 'Select Branch State'}
+                </Text>
+                <AppIcon name="chevron-down" size={16} color="#64748B" />
+              </TouchableOpacity>
+              {errors.stateName ? (
+                <Text style={styles.fieldErrorText}>{errors.stateName}</Text>
+              ) : null}
+
+              {/* City Selection (Dropdown - Filtered by Selected State from SQL) */}
+              <Text style={styles.pickerLabel}>City *</Text>
+              <TouchableOpacity
+                style={[
+                  styles.selectorBox,
+                  errors.unitCity ? styles.selectorBoxError : null,
+                ]}
+                activeOpacity={0.8}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  if (!stateName.trim()) {
+                    showToast({
+                      type: 'warning',
+                      title: 'Select State First',
+                      message: 'Please select a Branch State first to load its cities.',
+                    });
+                    return;
+                  }
+                  setCitySearch('');
+                  setCityPickerVisible(true);
+                  fetchCitiesForState(stateName);
+                }}
+              >
+                <Text style={unitCity ? styles.selectorBoxText : styles.selectorBoxPlaceholder}>
+                  {unitCity || (stateName ? `Select City in ${stateName}` : 'Select State First')}
+                </Text>
+                <AppIcon name="chevron-down" size={16} color="#64748B" />
+              </TouchableOpacity>
+              {errors.unitCity ? (
+                <Text style={styles.fieldErrorText}>{errors.unitCity}</Text>
+              ) : null}
 
               <View style={{ flexDirection: 'row', gap: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <AppTextInput
-                    label="City *"
-                    placeholder="e.g. Pune"
-                    value={unitCity}
-                    onChangeText={(v) => {
-                      setUnitCity(v);
-                      if (errors.unitCity) setErrors((prev) => ({ ...prev, unitCity: '' }));
-                    }}
-                    iconLeft="location"
-                    error={errors.unitCity}
-                  />
-                </View>
                 <View style={{ flex: 1 }}>
                   <AppTextInput
                     label="Pincode (6-digit) *"
@@ -833,8 +1102,21 @@ export const SiteUnitsScreen: React.FC = () => {
                     }}
                     keyboardType="numeric"
                     maxLength={6}
-                    iconLeft="file-text"
+                    iconLeft="location"
                     error={errors.pincode}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppTextInput
+                    label="File Number *"
+                    placeholder="e.g. 101"
+                    value={fileNo}
+                    onChangeText={(v) => {
+                      setFileNo(v);
+                      if (errors.fileNo) setErrors((prev) => ({ ...prev, fileNo: '' }));
+                    }}
+                    iconLeft="file-text"
+                    error={errors.fileNo}
                   />
                 </View>
               </View>
@@ -1260,9 +1542,19 @@ export const SiteUnitsScreen: React.FC = () => {
       onRequestClose={() => setClientPickerVisible(false)}
     >
       <View style={styles.modalOverlay}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={() => setClientPickerVisible(false)}
+        />
         <View style={[styles.pickerSheetContent, { paddingBottom: bottomInset + 10 }]}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Select Client</Text>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.modalTitle}>Select Client</Text>
+              <Text style={{ fontSize: 11, color: '#64748B', fontWeight: '600', marginTop: 2 }}>
+                {availableClients.length} clients registered
+              </Text>
+            </View>
             <TouchableOpacity
               style={styles.modalCloseBtn}
               onPress={() => setClientPickerVisible(false)}
@@ -1285,14 +1577,16 @@ export const SiteUnitsScreen: React.FC = () => {
             </View>
           ) : (
             <FlatList
-              data={availableClients.filter((c) => {
-                const q = clientSearch.toLowerCase().trim();
-                if (!q) return true;
-                return (
-                  c.client_name?.toLowerCase().includes(q) ||
-                  c.client_code?.toLowerCase().includes(q)
-                );
-              })}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: bottomInset + 30 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+              initialNumToRender={15}
+              maxToRenderPerBatch={15}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === 'android'}
+              data={filteredClients}
               keyExtractor={(item) => item.client_code}
               renderItem={({ item }) => {
                 const isSelected = clientCode === item.client_code;
@@ -1333,6 +1627,11 @@ export const SiteUnitsScreen: React.FC = () => {
       onRequestClose={() => setStatePickerVisible(false)}
     >
       <View style={styles.modalOverlay}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={() => setStatePickerVisible(false)}
+        />
         <View style={[styles.pickerSheetContent, { paddingBottom: bottomInset + 10 }]}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Select Branch State</Text>
@@ -1358,32 +1657,34 @@ export const SiteUnitsScreen: React.FC = () => {
             </View>
           ) : (
             <FlatList
-              data={(() => {
-                // Deduplicate state names
-                const map = new Map<string, BackendStateItem>();
-                availableStates.forEach((s) => {
-                  const name = (s.state_name || '').trim();
-                  if (name && !map.has(name.toLowerCase())) {
-                    map.set(name.toLowerCase(), s);
-                  }
-                });
-                const uniqueStates = Array.from(map.values());
-                const q = stateSearch.toLowerCase().trim();
-                return uniqueStates.filter((s) => !q || s.state_name.toLowerCase().includes(q));
-              })()}
-              keyExtractor={(item, idx) => `${item.state_name}-${idx}`}
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: bottomInset + 30 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+              initialNumToRender={15}
+              maxToRenderPerBatch={15}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === 'android'}
+              data={filteredStates}
+              keyExtractor={(item, idx) => `${item.sName}-${idx}`}
               renderItem={({ item }) => {
-                const isSelected = stateName.toLowerCase() === item.state_name.toLowerCase();
+                const isSelected = stateName.toLowerCase() === item.sName.toLowerCase();
                 return (
                   <TouchableOpacity
                     style={[styles.pickerItem, isSelected ? styles.pickerItemActive : null]}
                     onPress={() => {
-                      setStateName(item.state_name);
+                      if (stateName.toLowerCase() !== item.sName.toLowerCase()) {
+                        setUnitCity('');
+                        setAvailableCities([]);
+                      }
+                      setStateName(item.sName);
                       if (errors.stateName) setErrors((prev) => ({ ...prev, stateName: '' }));
                       setStatePickerVisible(false);
+                      fetchCitiesForState(item.sName);
                     }}
                   >
-                    <Text style={styles.pickerItemText}>{item.state_name}</Text>
+                    <Text style={styles.pickerItemText}>{item.sName}</Text>
                     {isSelected ? <AppIcon name="check" size={16} color="#0F766E" /> : null}
                   </TouchableOpacity>
                 );
@@ -1391,6 +1692,105 @@ export const SiteUnitsScreen: React.FC = () => {
               ListEmptyComponent={
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <Text style={{ color: '#64748B', fontSize: 12 }}>No states found.</Text>
+                </View>
+              }
+            />
+          )}
+        </View>
+      </View>
+    </Modal>
+
+    {/* City Picker Modal (100% SQL-driven, filtered by selected state) */}
+    <Modal
+      visible={cityPickerVisible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setCityPickerVisible(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={() => setCityPickerVisible(false)}
+        />
+        <View style={[styles.pickerSheetContent, { paddingBottom: bottomInset + 10 }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select City ({stateName})</Text>
+            <TouchableOpacity
+              style={styles.modalCloseBtn}
+              onPress={() => setCityPickerVisible(false)}
+            >
+              <AppIcon name="close" size={16} color="#0F766E" />
+            </TouchableOpacity>
+          </View>
+
+          <AppTextInput
+            placeholder="Search city..."
+            value={citySearch}
+            onChangeText={setCitySearch}
+            iconLeft="search"
+            containerStyle={{ marginBottom: 10 }}
+          />
+
+          {loadingCities && availableCities.length === 0 ? (
+            <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color="#0F766E" />
+            </View>
+          ) : (
+            <FlatList
+              style={{ flex: 1 }}
+              contentContainerStyle={{ paddingBottom: bottomInset + 30 }}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}
+              initialNumToRender={15}
+              maxToRenderPerBatch={15}
+              windowSize={5}
+              removeClippedSubviews={Platform.OS === 'android'}
+              data={filteredCities}
+              keyExtractor={(item, idx) => `${item}-${idx}`}
+              renderItem={({ item }) => {
+                const isSelected = unitCity.toLowerCase() === item.toLowerCase();
+                return (
+                  <TouchableOpacity
+                    style={[styles.pickerItem, isSelected ? styles.pickerItemActive : null]}
+                    onPress={() => {
+                      setUnitCity(item);
+                      if (errors.unitCity) setErrors((prev) => ({ ...prev, unitCity: '' }));
+                      setCityPickerVisible(false);
+                    }}
+                  >
+                    <Text style={styles.pickerItemText}>{item}</Text>
+                    {isSelected ? <AppIcon name="check" size={16} color="#0F766E" /> : null}
+                  </TouchableOpacity>
+                );
+              }}
+              ListEmptyComponent={
+                <View style={{ padding: 20, alignItems: 'center', gap: 10 }}>
+                  <Text style={{ color: '#64748B', fontSize: 12, textAlign: 'center' }}>
+                    {citySearch.trim()
+                      ? `No city matched "${citySearch.trim()}".`
+                      : `No cities found for ${stateName}.`}
+                  </Text>
+                  {citySearch.trim() ? (
+                    <TouchableOpacity
+                      style={{
+                        backgroundColor: '#0F766E',
+                        paddingHorizontal: 14,
+                        paddingVertical: 8,
+                        borderRadius: 8,
+                      }}
+                      onPress={() => {
+                        setUnitCity(citySearch.trim());
+                        if (errors.unitCity) setErrors((prev) => ({ ...prev, unitCity: '' }));
+                        setCityPickerVisible(false);
+                      }}
+                    >
+                      <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+                        Use "{citySearch.trim()}"
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               }
             />

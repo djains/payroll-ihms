@@ -200,10 +200,13 @@ export const superadminApi = {
   /**
    * Fetch States -> GET /api/masters/states/
    */
-  async getStates(search?: string) {
-    let url = API_ENDPOINTS.STATES;
+  async getStates(search?: string, pageSize: number = 100, page: number = 1, stateName?: string) {
+    let url = `${API_ENDPOINTS.STATES}?page=${page}&page_size=${pageSize}`;
     if (search) {
-      url += `?search=${encodeURIComponent(search)}`;
+      url += `&search=${encodeURIComponent(search)}`;
+    }
+    if (stateName) {
+      url += `&state_name=${encodeURIComponent(stateName)}`;
     }
     return apiClient.get<any>(url);
   },

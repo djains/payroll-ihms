@@ -490,10 +490,17 @@ export const staffApi = {
   },
 
   /**
-   * Fetch Company Departments -> GET /api/hr/departments/
+   * Fetch Company Departments -> GET /api/masters/departments/ (fallback: /api/hr/departments/)
    */
   async getDepartments() {
-    return apiClient.get('/api/hr/departments/');
+    const res = await apiClient.get<any>('/api/masters/departments/?page_size=100');
+    const list = res.success && res.data
+      ? (Array.isArray(res.data) ? res.data : res.data.results || [])
+      : [];
+    if (list.length > 0) {
+      return res;
+    }
+    return apiClient.get<any>('/api/hr/departments/?page_size=100');
   },
 
   /**

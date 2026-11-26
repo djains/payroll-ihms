@@ -48,6 +48,32 @@ interface WorkerItem {
   status?: string;
 }
 
+// Performance profiler for Workers Directory APIs
+const timedWorkersApi = async <T,>(name: string, fn: () => Promise<T>): Promise<T> => {
+  const t0 = Date.now();
+  try {
+    const res: any = await fn();
+    const cost = Date.now() - t0;
+    let detail = '';
+    if (res?.success && res?.data) {
+      const list = Array.isArray(res.data) ? res.data : res.data?.results;
+      if (Array.isArray(list)) {
+        detail = ` | Fetched ${list.length} records`;
+      } else if (typeof res.data === 'object') {
+        detail = ' | OK';
+      }
+    } else if (res && !res.success) {
+      detail = ` | Failed (${res.statusCode || ''}): ${res.error || 'Unknown error'}`;
+    }
+    console.log(`[Workers Directory API] ⏱️ ${name} -> ${cost}ms${detail}`);
+    return res;
+  } catch (err) {
+    const cost = Date.now() - t0;
+    console.warn(`[Workers Directory API] ❌ ${name} failed after ${cost}ms:`, err);
+    throw err;
+  }
+};
+
 
 const formatJoiningDate = (rawDate?: string): string => {
   if (!rawDate) return '—';
@@ -261,7 +287,9 @@ export const WorkersListScreen: React.FC = () => {
 
   const fetchWorkers = async () => {
     try {
-      const res = await apiClient.get<any>(`${API_ENDPOINTS.EMPLOYEES}?page=1`);
+      const res = await timedWorkersApi('Employees List (GET /api/hr/employees/?page=1)', () =>
+        apiClient.get<any>(`${API_ENDPOINTS.EMPLOYEES}?page=1`)
+      );
       if (res.success && res.data) {
         const raw = res.data;
         const list: WorkerItem[] = Array.isArray(raw)
@@ -310,7 +338,9 @@ export const WorkersListScreen: React.FC = () => {
     }));
 
     try {
-      const res = await staffApi.getLivePunchLogs(empCode);
+      const res = await timedWorkersApi(`Punch Logs (${empCode}) (GET /api/attendance/android-logs/)`, () =>
+        staffApi.getLivePunchLogs(empCode)
+      );
       let logs: any[] = [];
       if (res.success && res.data) {
         const d = res.data;
@@ -335,7 +365,9 @@ export const WorkersListScreen: React.FC = () => {
     setAssignShiftModalVisible(true);
     setLoadingAvailableShifts(true);
     try {
-      const res = await superadminApi.getShifts(worker.unit_code);
+      const res = await timedWorkersApi(`Shifts for Unit ${worker.unit_code} (GET /api/masters/shifts/)`, () =>
+        superadminApi.getShifts(worker.unit_code)
+      );
       if (res.success && res.data) {
         const list = Array.isArray(res.data) ? res.data : (res.data as any).results || [];
         setAvailableShifts(list);
@@ -373,22 +405,26 @@ export const WorkersListScreen: React.FC = () => {
         daysPayload[`day${String(d).padStart(2, '0')}`] = selectedShiftId;
       }
 
-      const res = await apiClient.post<any>('/api/masters/shift-calendar/update_row/', {
-        emp_code: selectedWorkerForShift.emp_code,
-        unit_code: selectedWorkerForShift.unit_code || '',
-        month,
-        year,
-        days: daysPayload,
-      });
+      const res = await timedWorkersApi(`Save Shift Calendar (POST /api/masters/shift-calendar/update_row/)`, () =>
+        apiClient.post<any>('/api/masters/shift-calendar/update_row/', {
+          emp_code: selectedWorkerForShift.emp_code,
+          unit_code: selectedWorkerForShift.unit_code || '',
+          month,
+          year,
+          days: daysPayload,
+        })
+      );
 
       // Also persist assigned shift_type and timings directly to Employee Master so Attendance Punch & Profile reflect it immediately
       if (chosenShift) {
         try {
-          await apiClient.patch<any>(`/api/hr/employees/${encodeURIComponent(selectedWorkerForShift.emp_code)}/`, {
-            shift_type: chosenShift.shift_name,
-            in_time: chosenShift.shift_from || '09:00',
-            working_hours: '8.0',
-          });
+          await timedWorkersApi(`Patch Employee Shift (PATCH /api/hr/employees/${selectedWorkerForShift.emp_code}/)`, () =>
+            apiClient.patch<any>(`/api/hr/employees/${encodeURIComponent(selectedWorkerForShift.emp_code)}/`, {
+              shift_type: chosenShift.shift_name,
+              in_time: chosenShift.shift_from || '09:00',
+              working_hours: '8.0',
+            })
+          );
         } catch (ePatch) {
           console.warn('[WorkersList] could not patch employee master shift_type:', ePatch);
         }
@@ -443,13 +479,15 @@ export const WorkersListScreen: React.FC = () => {
             setPromotingEmpCode(worker.emp_code);
             try {
               // 1. Promote this employee to Supervisor in backend
-              const promoteRes = await apiClient.patch<any>(
-                `${API_ENDPOINTS.EMPLOYEES}${worker.emp_code}/`,
-                {
-                  role: 'Supervisor',
-                  designation_code: 'Supervisor',
-                  grade_code: 'Supervisor',
-                }
+              const promoteRes = await timedWorkersApi(`Promote Employee ${worker.emp_code} (PATCH /api/hr/employees/${worker.emp_code}/)`, () =>
+                apiClient.patch<any>(
+                  `${API_ENDPOINTS.EMPLOYEES}${worker.emp_code}/`,
+                  {
+                    role: 'Supervisor',
+                    designation_code: 'Supervisor',
+                    grade_code: 'Supervisor',
+                  }
+                )
               );
 
               if (!promoteRes.success) {
@@ -571,8 +609,12 @@ export const WorkersListScreen: React.FC = () => {
       )}`;
 
       const [trackResult, punchResult] = await Promise.allSettled([
-        apiClient.get<any>(url),
-        staffApi.getLivePunchLogs(worker.emp_code),
+        timedWorkersApi(`Live Tracking for Unit ${unitParam} (GET /api/masters/portal/ho/tracking/)`, () =>
+          apiClient.get<any>(url)
+        ),
+        timedWorkersApi(`Tracking Punch Logs (${worker.emp_code}) (GET /api/attendance/android-logs/)`, () =>
+          staffApi.getLivePunchLogs(worker.emp_code)
+        ),
       ]);
 
       // Resolve today's punch-in / punch-out status from SQL punch logs
@@ -698,8 +740,10 @@ export const WorkersListScreen: React.FC = () => {
     // Fetch live processed salary stats from backend SQL for this worker
     setFetchingSlipData(true);
     try {
-      const res = await apiClient.get<any>(
-        `/api/payroll/mobile-salary-slip/data/?month=${currentM}&year=${currentY}&emp=${encodeURIComponent(worker.emp_code)}`
+      const res = await timedWorkersApi(`Salary Slip Data for ${worker.emp_code} (GET /api/payroll/mobile-salary-slip/data/)`, () =>
+        apiClient.get<any>(
+          `/api/payroll/mobile-salary-slip/data/?month=${currentM}&year=${currentY}&emp=${encodeURIComponent(worker.emp_code)}`
+        )
       );
       if (res.success && res.data) {
         setWorkerSlipData(res.data);
@@ -873,12 +917,21 @@ NG GLOBAL Administration`,
           activeOpacity={0.7}
         >
           <View style={[styles.cardTopRow, isExpanded && styles.cardTopRowExpanded]}>
-            <View style={styles.workerAvatar}>
-              <Text style={styles.workerAvatarText}>{initial}</Text>
+            <View style={styles.workerAvatarWrap}>
+              <View style={styles.workerAvatar}>
+                <Text style={styles.workerAvatarText}>{initial}</Text>
+              </View>
+              <View style={styles.avatarOnlineDot} />
             </View>
 
             <View style={styles.workerMeta}>
-              <Text style={styles.workerName}>{item.emp_name}</Text>
+              <View style={styles.workerNameRow}>
+                <Text style={styles.workerName}>{item.emp_name}</Text>
+                <View style={styles.unitPill}>
+                  <AppIcon name="unit" size={11} color="#0F766E" />
+                  <Text style={styles.unitPillText}>{item.unit_code || 'Unassigned'}</Text>
+                </View>
+              </View>
               <View style={styles.rolePillWrap}>
                 <View style={styles.codeBadge}>
                   <Text style={styles.codeBadgeText}>{item.emp_code}</Text>
@@ -895,16 +948,17 @@ NG GLOBAL Administration`,
                   </View>
                 )}
                 <View style={styles.activePill}>
+                  <View style={styles.activePillDot} />
                   <Text style={styles.activePillText}>Active</Text>
                 </View>
               </View>
             </View>
 
-            <View style={styles.chevronWrap}>
+            <View style={[styles.chevronWrap, isExpanded && styles.chevronWrapActive]}>
               <AppIcon
                 name={isExpanded ? 'chevron-up' : 'chevron-down'}
                 size={16}
-                color="#0F766E"
+                color={isExpanded ? '#FFFFFF' : '#64748B'}
               />
             </View>
           </View>
@@ -913,7 +967,6 @@ NG GLOBAL Administration`,
         {/* Collapsible Dropdown Content */}
         {isExpanded && (
           <View style={styles.expandedContent}>
-            <View style={styles.cardDivider} />
 
             {/* Credentials Section */}
             <View style={styles.credsCard}>
@@ -944,7 +997,9 @@ NG GLOBAL Administration`,
               {item.emp_email_id ? (
                 <View style={styles.credRow}>
                   <Text style={styles.credLabel}>Email ID:</Text>
-                  <Text style={styles.credValue}>{item.emp_email_id}</Text>
+                  <Text style={styles.credValue}>
+                    {item.emp_email_id}
+                  </Text>
                 </View>
               ) : null}
 
@@ -977,7 +1032,7 @@ NG GLOBAL Administration`,
                   <AppIcon name="unit" size={13} color="#0F766E" />
                   <Text style={styles.detailLabel}>Site Unit</Text>
                 </View>
-                <Text style={styles.detailVal} numberOfLines={1}>
+                <Text style={styles.detailVal}>
                   {item.unit_code || 'Unassigned'}
                 </Text>
               </View>
@@ -987,7 +1042,7 @@ NG GLOBAL Administration`,
                   <AppIcon name="map-pin" size={13} color="#0F766E" />
                   <Text style={styles.detailLabel}>Location</Text>
                 </View>
-                <Text style={styles.detailVal} numberOfLines={1}>
+                <Text style={styles.detailVal}>
                   {item.location_city || item.location || 'Site Location'}
                 </Text>
               </View>
@@ -997,7 +1052,7 @@ NG GLOBAL Administration`,
                   <AppIcon name="calendar" size={13} color="#0F766E" />
                   <Text style={styles.detailLabel}>Joining Date</Text>
                 </View>
-                <Text style={styles.detailVal} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                <Text style={styles.detailVal}>
                   {formatJoiningDate(item.joining_date)}
                 </Text>
               </View>
@@ -1027,25 +1082,6 @@ NG GLOBAL Administration`,
                 </Text>
               </TouchableOpacity>
             </View>
-
-            {/* 👑 Direct Promote to Unit Supervisor Action */}
-            <TouchableOpacity
-              style={[
-                styles.promoteSupervisorBtn,
-                promotingEmpCode === item.emp_code && styles.promoteSupervisorBtnDisabled,
-              ]}
-              onPress={() => handlePromoteToSupervisor(item)}
-              disabled={promotingEmpCode !== null}
-              activeOpacity={0.8}
-            >
-              {promotingEmpCode === item.emp_code ? (
-                <ActivityIndicator size="small" color="#92400E" />
-              ) : (
-                <Text style={styles.promoteSupervisorBtnText}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}><AppIcon name="shield" size={13} color={isSupervisor ? "#0F766E" : "#D97706"} /><Text style={[styles.promoteSupervisorBtnText, isSupervisor && { color: '#0F766E' }]}>{isSupervisor ? 'Assigned as Unit Supervisor' : 'Promote to Unit Supervisor'}</Text></View>
-                </Text>
-              )}
-            </TouchableOpacity>
 
             {/* Live Attendance Drawer */}
             {attInfo?.fetched ? (

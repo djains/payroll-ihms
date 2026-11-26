@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Platform, PermissionsAndroid } from 'react-native';
+import { View, Platform, PermissionsAndroid, NativeModules } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { useAuthStore } from '../../store/authStore';
 import { useShiftTrackingStore } from '../../store/shiftTrackingStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { showToast } from '../../store/toastStore';
 import { apiClient, API_ENDPOINTS } from '../../api';
-import { ANDROID_API_KEY } from '../../api/config';
+import { ANDROID_API_KEY, apiConfig } from '../../api/config';
 
+const { LiveLocationModule } = NativeModules;
 const WebViewComponent: any = WebView;
 
 /**
@@ -162,15 +163,74 @@ export const LiveShiftTracker: React.FC = () => {
     }
   }, [isTrackableWorker, isShiftActive, currentUser]);
 
-  // 3. Android Location Permission check
-  useEffect(() => {
-    if (!isTrackableWorker || !isShiftActive) return;
-    if (Platform.OS === 'android') {
-      PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION).catch(() => {});
-    }
-  }, [isTrackableWorker, isShiftActive]);
+  // 3. Android Native Foreground Service & Background Location Permission
+  const useNativeAndroidTracker = Platform.OS === 'android' && Boolean(LiveLocationModule);
 
-  if (!isTrackableWorker || !isShiftActive) {
+  useEffect(() => {
+    if (!useNativeAndroidTracker) {
+      if (isTrackableWorker && isShiftActive && Platform.OS === 'android') {
+        PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION).catch(() => {});
+      }
+      return;
+    }
+
+    if (!isTrackableWorker || !isShiftActive) {
+      LiveLocationModule.stopTracking?.().catch(() => {});
+      return;
+    }
+
+    let cancelled = false;
+    const ensurePermissionsAndStart = async () => {
+      try {
+        let fineGranted = await PermissionsAndroid.check(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+        );
+        if (!fineGranted) {
+          const res = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+          );
+          fineGranted = res === PermissionsAndroid.RESULTS.GRANTED;
+        }
+        if (!fineGranted || cancelled) return;
+
+        // Android 10+ (API 29+) requires ACCESS_BACKGROUND_LOCATION for tracking after app close
+        if (typeof Platform.Version === 'number' && Platform.Version >= 29) {
+          const bgPerm = 'android.permission.ACCESS_BACKGROUND_LOCATION' as any;
+          const bgGranted = await PermissionsAndroid.check(bgPerm);
+          if (!bgGranted) {
+            await PermissionsAndroid.request(bgPerm, {
+              title: 'Background Location Required',
+              message:
+                'Allow location access "All the time" so duty shift live tracking continues even when the app is closed.',
+              buttonPositive: 'Allow',
+              buttonNegative: 'Later',
+            });
+          }
+        }
+
+        if (cancelled) return;
+        const unitLabel = currentUser?.branchOrUnit || 'Field Location';
+        await LiveLocationModule.startTracking(
+          empCode,
+          apiConfig.getBaseUrl(),
+          ANDROID_API_KEY,
+          unitLabel,
+          unitCoords?.lat || 0,
+          unitCoords?.lon || 0
+        );
+      } catch (e) {
+        console.warn('[LiveShiftTracker] Native tracking start error:', e);
+      }
+    };
+
+    ensurePermissionsAndStart();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [useNativeAndroidTracker, isTrackableWorker, isShiftActive, empCode, unitCoords, currentUser?.branchOrUnit]);
+
+  if (!isTrackableWorker || !isShiftActive || useNativeAndroidTracker) {
     return null;
   }
 

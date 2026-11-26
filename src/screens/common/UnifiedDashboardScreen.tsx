@@ -22,15 +22,19 @@ import { useAuthStore } from '../../store/authStore';
 import { useTenantStore } from '../../store/tenantStore';
 import { useSuperAdminStore } from '../../store/superAdminStore';
 import { useNotificationStore } from '../../store/notificationStore';
-import { useNavigation } from '../../navigation/navigationContext';
+import { useNavigation, useNavigationState } from '../../navigation/navigationContext';
 import { ScreenName } from '../../navigation/types';
 import { staffApi, authApi, apiClient, API_ENDPOINTS, ANDROID_API_KEY, BreakPunchItem } from '../../api';
 import { checkForInAppUpdate } from '../../services/inAppUpdate.service';
+import { companyAttendanceReviewCache } from '../features/superadmin/CompanyAttendanceReviewScreen';
+import { companyWorkImagesReviewCache } from '../features/superadmin/CompanyWorkImagesReviewScreen';
+import { documentVerifyCache } from '../features/superadmin/DocumentVerifyScreen';
 import { colors } from '../../theme';
 import { ms } from '../../theme/responsive';
 
-// Central In-Memory Cache for fast, zero-flicker transitions
-let cachedDashboardData: {
+// Central In-Memory Cache with TTL for fast, zero-flicker transitions & lazy loading
+interface DashboardCacheRecord {
+  timestamp: number;
   attendanceCount: number;
   latestPunch: any;
   salaryData: any;
@@ -39,7 +43,21 @@ let cachedDashboardData: {
   kycStatus: string;
   pettyCashCount: number;
   deployedGuardsCount: number;
-} | null = null;
+  latestSalaryMonthLabel: string;
+  liveCompany: any;
+  profileName: string;
+  totalApis?: number;
+  durationMs?: number;
+  adminUnitsCount?: number;
+  adminWorkersCount?: number;
+  adminTodayPunchedCount?: number;
+  adminTodayWorkPhotosCount?: number;
+}
+
+const DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL
+const dashboardMemoryCache: Record<string, DashboardCacheRecord> = {};
+let cachedHolidaysList: any[] | null = null;
+const cachedPolicyThresholds: Record<string, { working: number; short: number }> = {};
 
 interface FeatureCardConfig {
   id: string;
@@ -97,51 +115,104 @@ function parseDojDate(rawStr?: string | null): Date | null {
   return isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
+/**
+ * Performance Profiler: Logs exact API endpoint name and duration in ms to console
+ */
+async function timedApi<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const t0 = Date.now();
+  try {
+    const res: any = await fn();
+    const cost = Date.now() - t0;
+    let detail = '';
+    if (res?.success && res?.data) {
+      const list = Array.isArray(res.data) ? res.data : res.data?.results;
+      if (Array.isArray(list)) {
+        const countStr = typeof res.data?.count === 'number' ? ` (Total: ${res.data.count})` : '';
+        detail = ` | Fetched ${list.length} records${countStr}`;
+      } else if (typeof res.data === 'object') {
+        detail = ' | OK';
+      }
+    } else if (res && !res.success) {
+      detail = ` | Failed: ${res.error || 'Unknown error'}`;
+    }
+    console.log(`[Dashboard API] ⏱️ ${name} -> ${cost}ms${detail}`);
+    return res;
+  } catch (err) {
+    const cost = Date.now() - t0;
+    console.warn(`[Dashboard API] ❌ ${name} failed after ${cost}ms:`, err);
+    throw err;
+  }
+}
+
 export const UnifiedDashboardScreen: React.FC = () => {
   const { currentUser, logout, hasMenuAccess } = useAuthStore();
   const { currentCompany } = useTenantStore();
   const { navigate } = useNavigation();
+  const { currentRoute } = useNavigationState();
   const insets = useSafeAreaInsets();
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 16);
 
+  const empCode = currentUser?.empCode || currentUser?.username || '';
+  const initialCache = empCode ? dashboardMemoryCache[empCode] : undefined;
+
   // Loading & Refreshing States
-  const [loading, setLoading] = useState<boolean>(!cachedDashboardData);
+  const [loading, setLoading] = useState<boolean>(!initialCache);
   const [refreshing, setRefreshing] = useState(false);
 
   // Live real data initialized from cache
   const [attendanceCount, setAttendanceCount] = useState<number>(
-    cachedDashboardData?.attendanceCount ?? 0
+    initialCache?.attendanceCount ?? 0
   );
   const [attendanceRatio, setAttendanceRatio] = useState<string>(() => {
     const n = new Date();
     const dInM = new Date(n.getFullYear(), n.getMonth() + 1, 0).getDate();
-    return `0/${dInM}`;
+    return initialCache ? `${initialCache.attendanceCount}/${dInM}` : `0/${dInM}`;
   });
   const [latestPunch, setLatestPunch] = useState<any | null>(
-    cachedDashboardData?.latestPunch ?? null
+    initialCache?.latestPunch ?? null
   );
   const [salaryData, setSalaryData] = useState<any | null>(
-    cachedDashboardData?.salaryData ?? null
+    initialCache?.salaryData ?? null
   );
   const [profileName, setProfileName] = useState<string>(
-    currentUser?.name && currentUser.name !== currentUser?.username ? currentUser.name : ''
+    initialCache?.profileName || (currentUser?.name && currentUser.name !== currentUser?.username ? currentUser.name : '')
   );
   const [remainingLeaveBalance, setRemainingLeaveBalance] = useState<number>(
-    cachedDashboardData?.remainingLeaveBalance ?? 0
+    initialCache?.remainingLeaveBalance ?? 0
   );
   const [kycStatus, setKycStatus] = useState<string>(
-    cachedDashboardData?.kycStatus ?? 'Not Submitted'
+    initialCache?.kycStatus ?? 'Not Submitted'
   );
   const [pettyCashCount, setPettyCashCount] = useState<number>(
-    cachedDashboardData?.pettyCashCount ?? 0
+    initialCache?.pettyCashCount ?? 0
   );
   const [deployedGuardsCount, setDeployedGuardsCount] = useState<number>(
-    cachedDashboardData?.deployedGuardsCount ?? 0
+    initialCache?.deployedGuardsCount ?? 0
   );
   // Company Admin Live Counts
-  const [adminUnitsCount, setAdminUnitsCount] = useState<number>(0);
-  const [adminWorkersCount, setAdminWorkersCount] = useState<number>(0);
-  const [latestSalaryMonthLabel, setLatestSalaryMonthLabel] = useState<string>('');
+  const [adminUnitsCount, setAdminUnitsCount] = useState<number>(
+    initialCache?.adminUnitsCount ?? 0
+  );
+  const [adminWorkersCount, setAdminWorkersCount] = useState<number>(
+    initialCache?.adminWorkersCount ?? 0
+  );
+  const [adminTodayPunchedCount, setAdminTodayPunchedCount] = useState<number | null>(
+    companyAttendanceReviewCache.records.length > 0
+      ? companyAttendanceReviewCache.records.length
+      : typeof initialCache?.adminTodayPunchedCount === 'number'
+      ? initialCache.adminTodayPunchedCount
+      : null
+  );
+  const [adminTodayWorkPhotosCount, setAdminTodayWorkPhotosCount] = useState<number | null>(
+    companyWorkImagesReviewCache.records.length > 0
+      ? companyWorkImagesReviewCache.records.length
+      : typeof initialCache?.adminTodayWorkPhotosCount === 'number'
+      ? initialCache.adminTodayWorkPhotosCount
+      : null
+  );
+  const [latestSalaryMonthLabel, setLatestSalaryMonthLabel] = useState<string>(
+    initialCache?.latestSalaryMonthLabel ?? ''
+  );
   // Real live company details from MySQL master_company (NO hardcoded dummy data)
   const [liveCompany, setLiveCompany] = useState<{
     name: string;
@@ -157,7 +228,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
     unitCode?: string;
     unitCity?: string;
     unitState?: string;
-  } | null>(null);
+  } | null>(initialCache?.liveCompany ?? null);
 
   // Custom Global Modal Alert State
   const [logoutModalVisible, setLogoutModalVisible] = useState<boolean>(false);
@@ -173,7 +244,6 @@ export const UnifiedDashboardScreen: React.FC = () => {
     title: '',
   });
 
-  const empCode = currentUser?.empCode || currentUser?.username || '';
   const brandColor = currentCompany?.brandColor || colors.primary;
   const userRole = String(currentUser?.role || '').toUpperCase();
   const isCompanyAdmin =
@@ -275,7 +345,9 @@ export const UnifiedDashboardScreen: React.FC = () => {
     if (!empCode) return null;
     try {
       const targetCompCode = String(currentUser?.companyId || (currentUser as any)?.scope?.comp_code || '').trim();
-      const bRes = await staffApi.getBreakStatus(empCode, targetCompCode);
+      const bRes = await timedApi('Break Status (GET /api/attendance/break-punch/)', () =>
+        staffApi.getBreakStatus(empCode, targetCompCode)
+      );
       if (bRes.success && bRes.data && bRes.data.status === 'ok') {
         const bd = bRes.data;
         const isBreakActive =
@@ -307,17 +379,59 @@ export const UnifiedDashboardScreen: React.FC = () => {
   };
 
   /**
-   * Fetch Live Data from Real MySQL Backend APIs
+   * Fetch Live Data from Real MySQL Backend APIs (Cached & Lazy-loaded)
    */
-  const fetchDashboardData = async () => {
+  const fetchDashboardData = async (isForce: boolean = false) => {
     if (!empCode) {
       setLoading(false);
       setRefreshing(false);
       return;
     }
 
+    const fetchStartTime = Date.now();
+    const isSupervisor = userRole.includes('SUPERVISOR') || Boolean(hasMenuAccess && hasMenuAccess('GUARD_DEPLOYMENT'));
+
     try {
       syncNotifications(currentUser);
+
+      // Check In-Memory Cache (Instant zero-flicker render)
+      const cached = dashboardMemoryCache[empCode];
+      if (cached) {
+        // Sync with freshest review screen caches if user navigated back
+        if (companyAttendanceReviewCache.records.length > 0) {
+          cached.adminTodayPunchedCount = companyAttendanceReviewCache.records.length;
+        }
+        if (companyWorkImagesReviewCache.records.length > 0) {
+          cached.adminTodayWorkPhotosCount = companyWorkImagesReviewCache.records.length;
+        }
+
+        setAttendanceCount(cached.attendanceCount);
+        const now = new Date();
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        setAttendanceRatio(`${cached.attendanceCount}/${daysInMonth}`);
+        if (cached.latestPunch) setLatestPunch(cached.latestPunch);
+        if (cached.salaryData) setSalaryData(cached.salaryData);
+        setRemainingLeaveBalance(cached.remainingLeaveBalance);
+        setKycStatus(cached.kycStatus);
+        setPettyCashCount(cached.pettyCashCount);
+        setDeployedGuardsCount(cached.deployedGuardsCount);
+        if (cached.latestSalaryMonthLabel) setLatestSalaryMonthLabel(cached.latestSalaryMonthLabel);
+        if (cached.liveCompany) setLiveCompany(cached.liveCompany);
+        if (cached.profileName) setProfileName(cached.profileName);
+        if (typeof cached.adminUnitsCount === 'number') setAdminUnitsCount(cached.adminUnitsCount);
+        if (typeof cached.adminWorkersCount === 'number') setAdminWorkersCount(cached.adminWorkersCount);
+        if (typeof cached.adminTodayPunchedCount === 'number') setAdminTodayPunchedCount(cached.adminTodayPunchedCount);
+        if (typeof cached.adminTodayWorkPhotosCount === 'number') setAdminTodayWorkPhotosCount(cached.adminTodayWorkPhotosCount);
+
+        // Instant Cache Hit: Return without network calls (unless forced pull-to-refresh)
+        if (!isForce) {
+          setLoading(false);
+          setRefreshing(false);
+          console.log(`[Dashboard] ⚡ Instant Cache Hit: 0 APIs called (0ms) | Punched Today: ${cached.adminTodayPunchedCount ?? 0} | Work Photos Today: ${cached.adminTodayWorkPhotosCount ?? 0} | Workers: ${cached.adminWorkersCount ?? 0} | Units: ${cached.adminUnitsCount ?? 0}`);
+          return;
+        }
+      }
+
       const rawUnit = currentUser?.branchOrUnit || (currentUser as any)?.scope?.unit_name || '';
       const rawUnitCode = (currentUser as any)?.scope?.unit_code || (currentUser as any)?.unitCode || '';
       const unitCode = rawUnitCode || rawUnit || '';
@@ -356,6 +470,33 @@ export const UnifiedDashboardScreen: React.FC = () => {
         return null;
       };
 
+      // Populate live company & unit details from currentUser.scope, currentUser.companyName, or tenant store immediately
+      const scope = (currentUser as any)?.scope;
+      const resolvedScopeCompName =
+        scope?.comp_name ||
+        scope?.company_name ||
+        (currentUser as any)?.companyName ||
+        currentCompany?.name ||
+        '';
+
+      if (scope || resolvedScopeCompName) {
+        setLiveCompany((prev) => ({
+          name: resolvedScopeCompName || prev?.name || '',
+          code: scope?.comp_code || currentUser?.companyId || prev?.code || targetCompCode,
+          location: scope?.location || prev?.location || '',
+          city: scope?.city || prev?.city || '',
+          state: scope?.state || scope?.region || prev?.state || '',
+          panNo: scope?.pan_no || prev?.panNo,
+          pfNo: scope?.pf_no || prev?.pfNo,
+          pin: scope?.pin || prev?.pin || '',
+          phone: scope?.phone || prev?.phone || '',
+          unitName: scope?.unit_name || currentUser?.branchOrUnit || prev?.unitName || '',
+          unitCode: scope?.unit_code || prev?.unitCode || rawUnitCode || '',
+          unitCity: scope?.city || prev?.unitCity || '',
+          unitState: scope?.state || scope?.region || prev?.unitState || '',
+        }));
+      }
+
       // If Company Admin, fetch company's live total units, total workers, and real company details!
       if (isCompanyAdmin) {
         useSuperAdminStore.getState().fetchLiveCompanies().catch(() => {});
@@ -363,153 +504,269 @@ export const UnifiedDashboardScreen: React.FC = () => {
           ? `${API_ENDPOINTS.COMPANIES}?search=${encodeURIComponent(targetCompCode)}`
           : `${API_ENDPOINTS.COMPANIES}?page=1&page_size=50`;
 
-        const [uRes, eRes, compRes] = await Promise.allSettled([
-          apiClient.get<any>(`${API_ENDPOINTS.UNITS}?page=1&page_size=1`),
-          apiClient.get<any>(`${API_ENDPOINTS.EMPLOYEES}?page=1&page_size=1`),
-          apiClient.get<any>(compUrl),
+        // Also pre-fetch today's punch logs and work photos for instant 0ms Company Review loading & live counts
+        const today = new Date();
+        const dStr = String(today.getDate()).padStart(2, '0');
+        const mStr = String(today.getMonth() + 1).padStart(2, '0');
+        const yStr = String(today.getFullYear());
+        const dateFormatted = `${dStr}/${mStr}/${yStr}`;
+        const dateIso = `${yStr}-${mStr}-${dStr}`;
+        const attLogsUrl = `/api/attendance/android-logs-portal/attendance-logs/?from_date=${dateFormatted}&to_date=${dateFormatted}&state_name=ALL&unit_code=ALL&client_code=ALL`;
+        const workImagesUrl = `/api/attendance/android-logs-portal/work-images/?from_date=${dateFormatted}&to_date=${dateFormatted}&state_name=ALL&unit_code=ALL&client_code=ALL`;
+
+        const [uRes, eRes, compRes, attRes, workRes, hrWorkRes] = await Promise.allSettled([
+          timedApi('Units Count (GET /api/masters/units/)', () => apiClient.get<any>(`${API_ENDPOINTS.UNITS}?page=1&page_size=1`)),
+          timedApi('Workers Count (GET /api/hr/employees/)', () => apiClient.get<any>(`${API_ENDPOINTS.EMPLOYEES}?page=1&page_size=1`)),
+          timedApi('Company Details (GET /api/masters/companies/)', () => apiClient.get<any>(compUrl)),
+          timedApi('Today Attendance Pre-fetch (GET .../attendance-logs/)', () => apiClient.get<any>(attLogsUrl)),
+          timedApi('Today Portal Work Photos (GET .../work-images/)', () => apiClient.get<any>(workImagesUrl)),
+          timedApi('Today HR Working Images (GET /api/hr/working-images/)', () => apiClient.get<any>(API_ENDPOINTS.WORKING_IMAGES)),
         ]);
+
+        let uTotal = 0;
+        let eTotal = 0;
+        let compObj: any = null;
 
         if (uRes.status === 'fulfilled' && uRes.value.success && uRes.value.data) {
           const ud = uRes.value.data;
-          const uTotal = typeof ud.count === 'number' ? ud.count : Array.isArray(ud) ? ud.length : Array.isArray(ud.results) ? ud.results.length : 0;
+          uTotal = typeof ud.count === 'number' ? ud.count : Array.isArray(ud) ? ud.length : Array.isArray(ud.results) ? ud.results.length : 0;
           setAdminUnitsCount(uTotal);
         }
 
         if (eRes.status === 'fulfilled' && eRes.value.success && eRes.value.data) {
           const ed = eRes.value.data;
-          const eTotal = typeof ed.count === 'number' ? ed.count : Array.isArray(ed) ? ed.length : Array.isArray(ed.results) ? ed.results.length : 0;
+          eTotal = typeof ed.count === 'number' ? ed.count : Array.isArray(ed) ? ed.length : Array.isArray(ed.results) ? ed.results.length : 0;
           setAdminWorkersCount(eTotal);
         }
 
         if (compRes.status === 'fulfilled' && compRes.value.success && compRes.value.data) {
           const cData = compRes.value.data;
           const list = Array.isArray(cData.results) ? cData.results : Array.isArray(cData) ? cData : [];
-          const compObj = parseCompanyFromList(list);
+          compObj = parseCompanyFromList(list);
           if (compObj) setLiveCompany(compObj);
         }
 
+        let todayPunched = 0;
+        if (attRes.status === 'fulfilled' && attRes.value.success && attRes.value.data) {
+          const aData = attRes.value.data;
+          const list: any[] = Array.isArray(aData) ? aData : aData.results || [];
+          companyAttendanceReviewCache.dateFormatted = dateFormatted;
+          companyAttendanceReviewCache.records = list;
+          companyAttendanceReviewCache.timestamp = Date.now();
+          todayPunched = list.length;
+          setAdminTodayPunchedCount(todayPunched);
+        }
+
+        let todayWorkPhotos = 0;
+        const mergedWorkList: any[] = [];
+        const seenWorkImages = new Set<string>();
+
+        // 1. Android logs portal work-images
+        let portalCount = 0;
+        if (workRes.status === 'fulfilled' && workRes.value.success && workRes.value.data) {
+          const wData = workRes.value.data;
+          const wList: any[] = Array.isArray(wData) ? wData : wData.results || [];
+          portalCount = wList.length;
+          wList.forEach((r: any, idx: number) => {
+            const rawImg = r.image_name || '';
+            const key = rawImg || `portal-${idx}`;
+            if (!seenWorkImages.has(key)) {
+              seenWorkImages.add(key);
+              mergedWorkList.push({
+                id: r.id || `pre-portal-${idx}`,
+                emp_code: r.emp_code || r.EMP_CODE || '',
+                EMP_NAME: r.EMP_NAME || r.emp_name || 'Staff Member',
+                unit_name: r.unit_name || r.unit_code || 'Site Unit',
+                category_name: r.category_name || r.image_type || '',
+                image_name: rawImg,
+                image_url: r.image_url,
+                datecurrent: r.datecurrent,
+              });
+            }
+          });
+        }
+
+        // 2. HR Working Images (/api/hr/working-images/)
+        let hrCount = 0;
+        if (hrWorkRes.status === 'fulfilled' && hrWorkRes.value.success && hrWorkRes.value.data) {
+          const hrData = hrWorkRes.value.data;
+          const hrList: any[] = Array.isArray(hrData) ? hrData : hrData.results || [];
+          hrList.forEach((wr: any, idx: number) => {
+            const dtRaw = wr.datecurrent || '';
+            if (dtRaw.includes(dateFormatted) || dtRaw.includes(dateIso)) {
+              hrCount++;
+              const rawImg = wr.image_name || '';
+              const key = rawImg || `hr-${idx}`;
+              if (!seenWorkImages.has(key)) {
+                seenWorkImages.add(key);
+                mergedWorkList.push({
+                  id: wr.id || `pre-hr-${idx}`,
+                  emp_code: wr.emp_code || wr.EMP_CODE || '',
+                  EMP_NAME: wr.emp_name || wr.EMP_NAME || 'Staff Member',
+                  unit_name: wr.unit_name || wr.unit_code || 'Site Unit',
+                  category_name: wr.category_name || wr.image_type || '',
+                  image_name: rawImg,
+                  image_url: wr.image_url,
+                  datecurrent: wr.datecurrent,
+                });
+              }
+            }
+          });
+        }
+
+        todayWorkPhotos = mergedWorkList.length;
+        companyWorkImagesReviewCache.dateFormatted = dateFormatted;
+        companyWorkImagesReviewCache.records = mergedWorkList;
+        companyWorkImagesReviewCache.timestamp = Date.now();
+        setAdminTodayWorkPhotosCount(todayWorkPhotos);
+        console.log(`[Dashboard API] 📸 Work Proof Fetch: Portal=${portalCount} | HR API=${hrCount} | Merged Total Today=${todayWorkPhotos}`);
+
+        // Save into dashboard memory cache with full telemetry
+        dashboardMemoryCache[empCode] = {
+          timestamp: Date.now(),
+          attendanceCount: 0,
+          latestPunch: null,
+          salaryData: null,
+          leaveCount: 0,
+          remainingLeaveBalance: 0,
+          kycStatus: 'Verified',
+          pettyCashCount: 0,
+          deployedGuardsCount: 0,
+          latestSalaryMonthLabel: '',
+          liveCompany: compObj || liveCompany,
+          profileName: currentUser?.name || 'Admin',
+          adminUnitsCount: uTotal,
+          adminWorkersCount: eTotal,
+          adminTodayPunchedCount: todayPunched,
+          adminTodayWorkPhotosCount: todayWorkPhotos,
+        };
+
+        const durationMs = Date.now() - fetchStartTime;
+        console.log(`[Dashboard] Company Admin Sync: 5 APIs in ~${durationMs}ms | Cached -> Punched Today: ${todayPunched} | Work Photos Today: ${todayWorkPhotos} | Workers: ${eTotal} | Units: ${uTotal}`);
         setLoading(false);
         setRefreshing(false);
         return;
       }
 
-      // Also fetch live company & unit details for all users from real backend
-      try {
-        const compUrl = targetCompCode
-          ? `${API_ENDPOINTS.COMPANIES}?search=${encodeURIComponent(targetCompCode)}`
-          : `${API_ENDPOINTS.COMPANIES}?page=1&page_size=50`;
-
-        const [compRes, unitRes] = await Promise.allSettled([
-          apiClient.get<any>(compUrl),
-          apiClient.get<any>(`${API_ENDPOINTS.UNITS}?page=1&page_size=50`),
-        ]);
-
-        let resolvedComp: any = null;
-        if (compRes.status === 'fulfilled' && compRes.value?.success && compRes.value?.data) {
-          const cData = compRes.value.data;
-          const list = Array.isArray(cData.results) ? cData.results : Array.isArray(cData) ? cData : [];
-          resolvedComp = parseCompanyFromList(list);
-        }
-
-        let resolvedUnitName = rawUnit;
-        let resolvedUnitCity = (currentUser as any)?.scope?.city || '';
-        let resolvedUnitState = (currentUser as any)?.scope?.region || (currentUser as any)?.scope?.state || '';
-        let resolvedUnitCode = rawUnitCode;
-
-        if (unitRes.status === 'fulfilled' && (unitRes.value as any)?.success && (unitRes.value as any)?.data) {
-          const uData = (unitRes.value as any).data;
-          const uList = Array.isArray(uData.results) ? uData.results : Array.isArray(uData) ? uData : [];
-          if (uList.length > 0) {
-            // Strictly match unit by user's assigned unit_code or unit_name - NEVER fall back to uList[0]
-            const matchedUnit = uList.find(
-              (u: any) =>
-                (rawUnitCode && String(u.unit_code).toLowerCase() === rawUnitCode.toLowerCase()) ||
-                (rawUnit && String(u.unit_name).toLowerCase() === rawUnit.toLowerCase())
-            );
-
-            if (matchedUnit) {
-              resolvedUnitName = matchedUnit.unit_name || rawUnit || '';
-              resolvedUnitCity = matchedUnit.unit_city || '';
-              resolvedUnitState = matchedUnit.state_name || '';
-              resolvedUnitCode = matchedUnit.unit_code || rawUnitCode;
+      // If company name is STILL not resolved and we have a company code, fetch company master from backend
+      if (!resolvedScopeCompName && !liveCompany?.name && targetCompCode) {
+        try {
+          const compUrl = `${API_ENDPOINTS.COMPANIES}?search=${encodeURIComponent(targetCompCode)}`;
+          const compRes = await timedApi('Company Master (GET /api/masters/companies/)', () => apiClient.get<any>(compUrl));
+          if (compRes.success && compRes.data) {
+            const list = Array.isArray(compRes.data.results) ? compRes.data.results : Array.isArray(compRes.data) ? compRes.data : [];
+            const compObj = parseCompanyFromList(list);
+            if (compObj) {
+              setLiveCompany((prev) => ({
+                ...prev,
+                ...compObj,
+              }));
             }
+          } else if (currentCompany?.name) {
+            // Permission restricted for workers (403): fallback gracefully to selected company in store
+            setLiveCompany((prev) => ({
+              location: prev?.location || '',
+              city: prev?.city || '',
+              ...prev,
+              name: prev?.name || currentCompany.name,
+              code: prev?.code || targetCompCode,
+            }));
+          }
+        } catch {
+          if (currentCompany?.name) {
+            setLiveCompany((prev) => ({
+              location: prev?.location || '',
+              city: prev?.city || '',
+              ...prev,
+              name: prev?.name || currentCompany.name,
+              code: prev?.code || targetCompCode,
+            }));
           }
         }
+      }
 
-        if (resolvedComp || resolvedUnitCity || resolvedUnitState) {
-          setLiveCompany((prev) => ({
-            name: resolvedComp?.name || prev?.name || '',
-            code: resolvedComp?.code || prev?.code || targetCompCode,
-            location: resolvedComp?.location || prev?.location || '',
-            city: resolvedComp?.city || resolvedUnitCity || prev?.city || '',
-            state: resolvedComp?.state || resolvedUnitState || prev?.state || '',
-            panNo: resolvedComp?.panNo || prev?.panNo,
-            pfNo: resolvedComp?.pfNo || prev?.pfNo,
-            pin: resolvedComp?.pin || prev?.pin || '',
-            phone: resolvedComp?.phone || prev?.phone || '',
-            unitName: resolvedUnitName || prev?.unitName || '',
-            unitCode: resolvedUnitCode || prev?.unitCode || '',
-            unitCity: resolvedUnitCity || prev?.unitCity || '',
-            unitState: resolvedUnitState || prev?.unitState || '',
-          }));
-        }
-      } catch {}
+      const canViewWorkProof = Boolean(
+        hasMenuAccess &&
+        (hasMenuAccess('Branchwise image upload') || hasMenuAccess('Working Images Upload'))
+      );
 
+      // Lazy load petty cash, guard deployment and work proof for staff/supervisors
       const results = await Promise.allSettled([
-        staffApi.getLivePunchLogs(empCode),
-        staffApi.getSalaryDetails(empCode),
-        staffApi.getLeaveApplications(),
-        staffApi.getDocumentsStatus(empCode),
-        staffApi.getPettyCashRequests(),
-        apiClient.get<any>(`${API_ENDPOINTS.EMPLOYEES}?unit_code=${encodeURIComponent(unitCode)}&active=1`),
+        timedApi('Punch Logs (GET /api/attendance/android-logs/)', () => staffApi.getLivePunchLogs(empCode)),
+        timedApi('Salary Details (GET /api/payroll/staff-salaries/)', () => staffApi.getSalaryDetails(empCode)),
+        timedApi('Leave Applications (GET /api/leaves/applications/)', () => staffApi.getLeaveApplications()),
+        timedApi('Documents & KYC (GET /api/hr/android-documents/)', () => staffApi.getDocumentsStatus(empCode)),
+        isSupervisor
+          ? timedApi('Petty Cash (GET /api/petty-cash/requests/)', () => staffApi.getPettyCashRequests())
+          : Promise.resolve({ success: true, data: [] } as any),
+        isSupervisor
+          ? timedApi('Deployed Guards (GET /api/hr/employees/)', () => apiClient.get<any>(`${API_ENDPOINTS.EMPLOYEES}?unit_code=${encodeURIComponent(unitCode)}&active=1`))
+          : Promise.resolve({ success: true, data: [] } as any),
+        canViewWorkProof
+          ? timedApi('Staff Work Proof (GET /api/hr/working-images/)', () => apiClient.get<any>(`${API_ENDPOINTS.WORKING_IMAGES}${unitCode ? `?unit_code=${encodeURIComponent(unitCode)}` : ''}`))
+          : Promise.resolve({ success: true, data: [] } as any),
       ]);
 
-      const [attRes, salRes, leaveRes, docRes, pettyRes, guardsRes] = results;
+      const [attRes, salRes, leaveRes, docRes, pettyRes, guardsRes, workProofRes] = results;
 
-      // Resolve latest Salary Slip month strictly from SQL (payroll_staff_salary_pro / mobile-salary-slip/months)
-      try {
-        const MONTHS_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        let resolvedLabel = '';
-        const realUnitCode = (currentUser as any)?.scope?.unit_code || '';
-        const proRes = await staffApi.getApprovedSalaryList({
-          ...(realUnitCode ? { unit_code: realUnitCode } : {}),
-          emp_code: empCode,
-        });
-        if (proRes.success && proRes.data) {
-          const proList = Array.isArray((proRes.data as any).results)
-            ? (proRes.data as any).results
-            : Array.isArray(proRes.data)
-            ? proRes.data
-            : [];
-          const cleanEmp = String(empCode || '').trim().toUpperCase();
-          const myRows = proList.filter(
-            (r: any) => String(r.emp_code || '').trim().toUpperCase() === cleanEmp
-          );
-          if (myRows.length > 0) {
-            myRows.sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
-            const mNum = parseInt(myRows[0].month, 10);
-            const yNum = parseInt(myRows[0].year, 10);
-            if (mNum >= 1 && mNum <= 12 && yNum) {
-              resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
-            }
+      // Resolve latest Salary Slip month strictly from SQL
+      let resolvedLabel = '';
+      const MONTHS_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
+        const sList = (salRes.value.data as any).results || salRes.value.data;
+        if (Array.isArray(sList) && sList.length > 0) {
+          const mNum = parseInt(sList[0].month || sList[0].salary_month, 10);
+          const yNum = parseInt(sList[0].year || sList[0].salary_year, 10);
+          if (mNum >= 1 && mNum <= 12 && yNum) {
+            resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
           }
         }
-        if (!resolvedLabel) {
-          const mRes = await staffApi.getMobileSalarySlipMonths();
-          if (mRes.success && mRes.data) {
-            const mList = (mRes.data as any).results || mRes.data;
-            if (Array.isArray(mList) && mList.length > 0) {
-              const sorted = [...mList].sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
-              const mNum = parseInt(sorted[0].month, 10);
-              const yNum = parseInt(sorted[0].year, 10);
+      }
+      if (!resolvedLabel) {
+        try {
+          const realUnitCode = (currentUser as any)?.scope?.unit_code || '';
+          const proRes = await staffApi.getApprovedSalaryList({
+            ...(realUnitCode ? { unit_code: realUnitCode } : {}),
+            emp_code: empCode,
+          });
+          if (proRes.success && proRes.data) {
+            const proList = Array.isArray((proRes.data as any).results)
+              ? (proRes.data as any).results
+              : Array.isArray(proRes.data)
+              ? proRes.data
+              : [];
+            const cleanEmp = String(empCode || '').trim().toUpperCase();
+            const myRows = proList.filter(
+              (r: any) => String(r.emp_code || '').trim().toUpperCase() === cleanEmp
+            );
+            if (myRows.length > 0) {
+              myRows.sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
+              const mNum = parseInt(myRows[0].month, 10);
+              const yNum = parseInt(myRows[0].year, 10);
               if (mNum >= 1 && mNum <= 12 && yNum) {
                 resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
               }
             }
           }
-        }
+          if (!resolvedLabel) {
+            const mRes = await staffApi.getMobileSalarySlipMonths();
+            if (mRes.success && mRes.data) {
+              const mList = (mRes.data as any).results || mRes.data;
+              if (Array.isArray(mList) && mList.length > 0) {
+                const sorted = [...mList].sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
+                const mNum = parseInt(sorted[0].month, 10);
+                const yNum = parseInt(sorted[0].year, 10);
+                if (mNum >= 1 && mNum <= 12 && yNum) {
+                  resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+      if (resolvedLabel) {
         setLatestSalaryMonthLabel(resolvedLabel);
-      } catch {}
+      }
 
       let newAttCount = attendanceCount;
       let newLatestPunch = latestPunch;
@@ -520,74 +777,93 @@ export const UnifiedDashboardScreen: React.FC = () => {
       let newGuardsCount = deployedGuardsCount;
       let liveJoiningDate: string = currentUser?.joiningDate || '';
 
-      // 0. Process Profile User Details from MySQL GetUserDetails
-      try {
-        const uDetailsRes = await apiClient.get<any>(
-          `/api/mobile/GetUserDetails/?userName=${encodeURIComponent(currentUser?.username || empCode)}`,
-          { 'X-API-Key': ANDROID_API_KEY }
-        );
-        if (uDetailsRes.success && uDetailsRes.data) {
-          const rawList = uDetailsRes.data;
-          const item = Array.isArray(rawList) ? rawList[0] : rawList;
-          if (item?.EMP_NAME && item.EMP_NAME.trim()) {
-            const resolvedName = item.EMP_NAME.trim();
-            setProfileName(resolvedName);
-            if (!isCompanyAdmin && currentUser && currentUser.name !== resolvedName) {
-              useAuthStore.getState().updateCurrentUser({ name: resolvedName });
+      // 0. Process Profile User Details from MySQL GetUserDetails only if not yet loaded
+      if (!profileName || !currentUser?.joiningDate) {
+        try {
+          const uDetailsRes = await apiClient.get<any>(
+            `/api/mobile/GetUserDetails/?userName=${encodeURIComponent(currentUser?.username || empCode)}`,
+            { 'X-API-Key': ANDROID_API_KEY }
+          );
+          if (uDetailsRes.success && uDetailsRes.data) {
+            const rawList = uDetailsRes.data;
+            const item = Array.isArray(rawList) ? rawList[0] : rawList;
+            if (item?.EMP_NAME && item.EMP_NAME.trim()) {
+              const resolvedName = item.EMP_NAME.trim();
+              setProfileName(resolvedName);
+              if (!isCompanyAdmin && currentUser && currentUser.name !== resolvedName) {
+                useAuthStore.getState().updateCurrentUser({ name: resolvedName });
+              }
             }
-          }
-          if (item?.JOINING_DATE) {
-            liveJoiningDate = item.JOINING_DATE;
-            if (currentUser && currentUser.joiningDate !== item.JOINING_DATE) {
-              useAuthStore.getState().updateCurrentUser({ joiningDate: item.JOINING_DATE });
+            if (item?.JOINING_DATE) {
+              liveJoiningDate = item.JOINING_DATE;
+              if (currentUser && currentUser.joiningDate !== item.JOINING_DATE) {
+                useAuthStore.getState().updateCurrentUser({ joiningDate: item.JOINING_DATE });
+              }
             }
-          }
-          if (item?.DEPT_CODE && (String(item.DEPT_CODE).includes('.') || String(item.DEPT_CODE).startsWith('http'))) {
-            const pStr = String(item.DEPT_CODE).trim();
-            const avatarUri = pStr.startsWith('http') ? pStr : `/media/documents/${pStr.replace(/^\/+/, '')}`;
-            if (currentUser && currentUser.avatarUrl !== avatarUri) {
-              useAuthStore.getState().updateCurrentUser({ avatarUrl: avatarUri });
-            }
-          }
-
-          // Fallback: If GetUserDetails didn't return employee name, fetch from attendance logs or muster sheet
-          if (!profileName) {
-            try {
-              const logRes = await apiClient.get<any>(
-                `/api/attendance/android-logs/?emp_code=${encodeURIComponent(currentUser?.username || empCode)}`
-              );
-              if (logRes.success && logRes.data) {
-                const lList = Array.isArray(logRes.data) ? logRes.data : (logRes.data as any).results || [];
-                const lMatch = lList.find((l: any) => String(l.emp_code).toLowerCase() === String(currentUser?.username || empCode).toLowerCase()) || lList[0];
-                if (lMatch?.emp_name && lMatch.emp_name.trim()) {
-                  const resolvedLogName = lMatch.emp_name.trim();
-                  setProfileName(resolvedLogName);
-                  if (!isCompanyAdmin && currentUser && currentUser.name !== resolvedLogName) {
-                    useAuthStore.getState().updateCurrentUser({ name: resolvedLogName });
+            if (item?.DEPT_CODE && (String(item.DEPT_CODE).includes('.') || String(item.DEPT_CODE).startsWith('http'))) {
+              const pStr = String(item.DEPT_CODE).trim();
+              const avatarUri = pStr.startsWith('http') ? pStr : `/media/documents/${pStr.replace(/^\/+/, '')}`;
+              if (currentUser && currentUser.avatarUrl !== avatarUri) {
+                useAuthStore.getState().updateCurrentUser({ avatarUrl: avatarUri });
+              }
+            } else if (currentUser && !currentUser.avatarUrl) {
+              // Modern Web Portal photo fallback (/api/hr/employee-documents/)
+              staffApi.getEmployeeDocuments(currentUser.username || empCode).then((mDocRes) => {
+                if (mDocRes.success && mDocRes.data) {
+                  const mList = Array.isArray(mDocRes.data.results) ? mDocRes.data.results : (Array.isArray(mDocRes.data) ? mDocRes.data : []);
+                  const photoItem = mList.find((d: any) => {
+                    const key = String(d.document_type || '').toLowerCase();
+                    return (key.includes('photo') || key.includes('passport')) && (d.file || d.file_url);
+                  });
+                  if (photoItem) {
+                    const rawP = photoItem.file || photoItem.file_url;
+                    const src = apiClient.getImageSource(rawP);
+                    if (src?.uri) {
+                      useAuthStore.getState().updateCurrentUser({ avatarUrl: src.uri });
+                    }
                   }
                 }
-              }
-            } catch {}
-          }
+              }).catch(() => {});
+            }
 
-          // Populate live company details from GetUserDetails COMP_NAME if available
-          if (item?.COMP_NAME && item.COMP_NAME.trim()) {
-            setLiveCompany((prev) => ({
-              name: item.COMP_NAME.trim(),
-              code: prev?.code || item.COMP_CODE || targetCompCode,
-              location: prev?.location || '',
-              city: prev?.city || '',
-              state: prev?.state,
-              panNo: prev?.panNo,
-              pfNo: prev?.pfNo,
-              unitName: prev?.unitName || item.UNIT_NAME || '',
-              unitCode: prev?.unitCode || item.UNIT_CODE || unitCode,
-              unitCity: prev?.unitCity || '',
-              unitState: prev?.unitState || '',
-            }));
+            // Fallback: If GetUserDetails didn't return employee name, fetch from attendance logs
+            if (!profileName) {
+              try {
+                const logRes = await apiClient.get<any>(
+                  `/api/attendance/android-logs/?emp_code=${encodeURIComponent(currentUser?.username || empCode)}`
+                );
+                if (logRes.success && logRes.data) {
+                  const lList = Array.isArray(logRes.data) ? logRes.data : (logRes.data as any).results || [];
+                  const lMatch = lList.find((l: any) => String(l.emp_code).toLowerCase() === String(currentUser?.username || empCode).toLowerCase()) || lList[0];
+                  if (lMatch?.emp_name && lMatch.emp_name.trim()) {
+                    const resolvedLogName = lMatch.emp_name.trim();
+                    setProfileName(resolvedLogName);
+                    if (!isCompanyAdmin && currentUser && currentUser.name !== resolvedLogName) {
+                      useAuthStore.getState().updateCurrentUser({ name: resolvedLogName });
+                    }
+                  }
+                }
+              } catch {}
+            }
+
+            if (item?.COMP_NAME && item.COMP_NAME.trim()) {
+              setLiveCompany((prev) => ({
+                name: item.COMP_NAME.trim(),
+                code: prev?.code || item.COMP_CODE || targetCompCode,
+                location: prev?.location || '',
+                city: prev?.city || '',
+                state: prev?.state,
+                panNo: prev?.panNo,
+                pfNo: prev?.pfNo,
+                unitName: prev?.unitName || item.UNIT_NAME || '',
+                unitCode: prev?.unitCode || item.UNIT_CODE || unitCode,
+                unitCity: prev?.unitCity || '',
+                unitState: prev?.unitState || '',
+              }));
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
 
       // 1. Process Attendance
       if (attRes.status === 'fulfilled' && attRes.value.success && attRes.value.data) {
@@ -668,14 +944,20 @@ export const UnifiedDashboardScreen: React.FC = () => {
           // Fetch company attendance policy threshold (or default to 8.0h full / 4.0h half)
           let workingThreshold = 8.0;
           let shortThreshold = 4.0;
-          try {
-            const pRes = await staffApi.getPolicyThresholds(empCode);
-            if (pRes.success && pRes.data) {
-              const pData = pRes.data as any;
-              workingThreshold = Number(pData.working_hours) || 8.0;
-              shortThreshold = Number(pData.short_hours) || 4.0;
-            }
-          } catch {}
+          if (cachedPolicyThresholds[empCode]) {
+            workingThreshold = cachedPolicyThresholds[empCode].working;
+            shortThreshold = cachedPolicyThresholds[empCode].short;
+          } else {
+            try {
+              const pRes = await staffApi.getPolicyThresholds(empCode);
+              if (pRes.success && pRes.data) {
+                const pData = pRes.data as any;
+                workingThreshold = Number(pData.working_hours) || 8.0;
+                shortThreshold = Number(pData.short_hours) || 4.0;
+                cachedPolicyThresholds[empCode] = { working: workingThreshold, short: shortThreshold };
+              }
+            } catch {}
+          }
 
           const activeDoj = liveJoiningDate || currentUser?.joiningDate || '';
           const dojDate = parseDojDate(activeDoj);
@@ -738,9 +1020,17 @@ export const UnifiedDashboardScreen: React.FC = () => {
           // 2. Add dynamic MySQL holidays up to today if configured and not punched
           const countedExtraDates = new Set<string>();
           try {
-            const hRes = await staffApi.getHolidays();
-            if (hRes.success && hRes.data) {
-              const hList = Array.isArray(hRes.data.results) ? hRes.data.results : (Array.isArray(hRes.data) ? hRes.data : []);
+            let hList = cachedHolidaysList;
+            if (!hList) {
+              const hRes = await staffApi.getHolidays();
+              if (hRes.success && hRes.data) {
+                hList = Array.isArray(hRes.data.results) ? hRes.data.results : (Array.isArray(hRes.data) ? hRes.data : []);
+                cachedHolidaysList = hList;
+              } else {
+                hList = [];
+              }
+            }
+            if (hList && hList.length > 0) {
               hList.forEach((h: any) => {
                 if (h.holiday_date) {
                   const hParts = String(h.holiday_date).split(' ')[0].split(/[-/]/);
@@ -844,7 +1134,9 @@ export const UnifiedDashboardScreen: React.FC = () => {
 
       // 3. Process Live Leave Balances from MySQL
       try {
-        const balRes = await staffApi.getLeaveBalances();
+        const balRes = await timedApi('Leave Balances (GET /api/leaves/balances/)', () =>
+          staffApi.getLeaveBalances()
+        );
         if (balRes.success && balRes.data) {
           const resList = (balRes.data as any).results || balRes.data;
           if (Array.isArray(resList) && resList.length > 0) {
@@ -900,8 +1192,33 @@ export const UnifiedDashboardScreen: React.FC = () => {
         }
       }
 
-      // Update cache
-      cachedDashboardData = {
+      // 7. Process Staff Work Proof
+      let staffWorkProofToday = 0;
+      if (workProofRes.status === 'fulfilled' && workProofRes.value.success && workProofRes.value.data) {
+        const wpData = workProofRes.value.data;
+        const wpList: any[] = Array.isArray(wpData) ? wpData : wpData.results || [];
+        const today = new Date();
+        const dStr = String(today.getDate()).padStart(2, '0');
+        const mStr = String(today.getMonth() + 1).padStart(2, '0');
+        const yStr = String(today.getFullYear());
+        const dateFormatted = `${dStr}/${mStr}/${yStr}`;
+        const dateIso = `${yStr}-${mStr}-${dStr}`;
+        wpList.forEach((wr: any) => {
+          const dtRaw = wr.datecurrent || '';
+          if (dtRaw.includes(dateFormatted) || dtRaw.includes(dateIso)) {
+            staffWorkProofToday++;
+          }
+        });
+        setAdminTodayWorkPhotosCount(staffWorkProofToday);
+      }
+
+      // Update in-memory cache with measured performance
+      const durationMs = Date.now() - fetchStartTime;
+      const apiCallCount = isSupervisor ? 7 : 5;
+      console.log(`[Dashboard] Sync: ${apiCallCount} APIs in ~${durationMs}ms | Work Proofs Today: ${staffWorkProofToday}`);
+
+      dashboardMemoryCache[empCode] = {
+        timestamp: Date.now(),
         attendanceCount: newAttCount,
         latestPunch: newLatestPunch,
         salaryData: newSalary,
@@ -910,6 +1227,12 @@ export const UnifiedDashboardScreen: React.FC = () => {
         kycStatus: newKyc,
         pettyCashCount: newPettyCount,
         deployedGuardsCount: newGuardsCount,
+        latestSalaryMonthLabel: resolvedLabel,
+        liveCompany: liveCompany,
+        profileName: profileName || currentUser?.name || '',
+        adminTodayWorkPhotosCount: staffWorkProofToday,
+        totalApis: apiCallCount,
+        durationMs,
       };
     } catch (e) {
       console.warn('[UnifiedDashboard] API fetch error:', e);
@@ -920,15 +1243,28 @@ export const UnifiedDashboardScreen: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchDashboardData();
+    // If returning from review screens, update count states immediately
+    if (companyAttendanceReviewCache.records.length > 0) {
+      setAdminTodayPunchedCount(companyAttendanceReviewCache.records.length);
+      if (empCode && dashboardMemoryCache[empCode]) {
+        dashboardMemoryCache[empCode].adminTodayPunchedCount = companyAttendanceReviewCache.records.length;
+      }
+    }
+    if (companyWorkImagesReviewCache.records.length > 0) {
+      setAdminTodayWorkPhotosCount(companyWorkImagesReviewCache.records.length);
+      if (empCode && dashboardMemoryCache[empCode]) {
+        dashboardMemoryCache[empCode].adminTodayWorkPhotosCount = companyWorkImagesReviewCache.records.length;
+      }
+    }
+    fetchDashboardData(false);
     checkForInAppUpdate();
-  }, [empCode]);
+  }, [empCode, currentRoute.name]);
 
   const onRefresh = async () => {
     setRefreshing(true);
     try {
       // Refresh live permissions and scope in background
-      const meRes = await authApi.getMe();
+      const meRes = await timedApi('User Permissions & Me (GET /api/auth/me/)', () => authApi.getMe());
       if (meRes.success && meRes.data) {
         const rawPerms = Array.isArray(meRes.data.permissions)
           ? meRes.data.permissions.map((p: any) => ({
@@ -946,7 +1282,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
         }
       }
     } catch (_) {}
-    await fetchDashboardData();
+    await fetchDashboardData(true);
   };
 
   /**
@@ -1430,9 +1766,10 @@ export const UnifiedDashboardScreen: React.FC = () => {
   const unitPost = latestPunch?.address || currentUser?.branchOrUnit || (currentUser as any)?.scope?.unit_code || '';
   const companyName =
     liveCompany?.name ||
-    currentCompany?.name ||
+    currentUser?.companyName ||
     (currentUser as any)?.scope?.company_name ||
     (currentUser as any)?.scope?.comp_name ||
+    currentCompany?.name ||
     companyCode;
   const companyCity =
     liveCompany?.city ||
@@ -1530,7 +1867,12 @@ export const UnifiedDashboardScreen: React.FC = () => {
     {
       id: 'work_proof',
       title: 'Work Proof',
-      getSubtitle: () => 'Upload',
+      getSubtitle: () => {
+        if (adminTodayWorkPhotosCount !== null && adminTodayWorkPhotosCount > 0) {
+          return `${adminTodayWorkPhotosCount} Today`;
+        }
+        return 'Upload';
+      },
       icon: 'camera',
       bgColor: '#CFFAFE',
       iconColor: '#0891B2',
@@ -1774,11 +2116,18 @@ export const UnifiedDashboardScreen: React.FC = () => {
     {
       id: 'admin_doc_verify',
       title: 'Document Verify',
-      getSubtitle: () => 'Review KYC Docs',
-      icon: 'shield',
-      bgColor: '#EDE9FE',
-      iconColor: '#7C3AED',
-      badgeColor: '#6D28D9',
+      getSubtitle: () => {
+        const cached = documentVerifyCache.records;
+        if (cached && cached.length > 0) {
+          const pending = cached.filter((d: any) => (d.reject ?? 0) === 0).length;
+          return pending > 0 ? `${pending} Pending KYC` : `${cached.length} Docs Total`;
+        }
+        return 'Review KYC Docs';
+      },
+      icon: 'id-card',
+      bgColor: '#FEF3C7',
+      iconColor: '#D97706',
+      badgeColor: '#B45309',
       targetScreen: 'DocumentVerify',
       isAvailable: (hasAccess) => {
         if (isCompanyAdmin) return true;
@@ -1789,7 +2138,12 @@ export const UnifiedDashboardScreen: React.FC = () => {
     {
       id: 'admin_attendance_review',
       title: 'Punch Photos',
-      getSubtitle: () => 'Staff Calendar',
+      getSubtitle: (d) => {
+        if (adminTodayPunchedCount !== null) {
+          return `${adminTodayPunchedCount} Punched Today`;
+        }
+        return 'Today Live Punches';
+      },
       icon: 'camera',
       bgColor: '#CCFBF1',
       iconColor: '#0F766E',
@@ -1801,7 +2155,12 @@ export const UnifiedDashboardScreen: React.FC = () => {
     {
       id: 'admin_work_images_review',
       title: 'Work Photos',
-      getSubtitle: () => 'Daily Proofs',
+      getSubtitle: () => {
+        if (adminTodayWorkPhotosCount !== null) {
+          return `${adminTodayWorkPhotosCount} Proofs Today`;
+        }
+        return 'Daily Proofs';
+      },
       icon: 'passport-photo',
       bgColor: '#EDE9FE',
       iconColor: '#7C3AED',
@@ -1899,9 +2258,9 @@ export const UnifiedDashboardScreen: React.FC = () => {
             }
           >
             <View style={[styles.avatarCircle, { backgroundColor: brandColor, overflow: 'hidden' }]}>
-              {currentUser?.avatarUrl ? (
+              {currentUser?.avatarUrl && apiClient.getImageSource(currentUser.avatarUrl) ? (
                 <Image
-                  source={{ uri: currentUser.avatarUrl }}
+                  source={apiClient.getImageSource(currentUser.avatarUrl)!}
                   style={{ width: '100%', height: '100%' }}
                   resizeMode="cover"
                 />
@@ -1919,17 +2278,6 @@ export const UnifiedDashboardScreen: React.FC = () => {
           </TouchableOpacity>
 
           <View style={styles.headerRightGroup}>
-            {/* Terms & Conditions / Google Play Policy Icon (Left of Notifications) */}
-            <TouchableOpacity
-              style={styles.bellButton}
-              onPress={() => Linking.openURL('https://payroll.coreal.in/login/terms-and-conditions')}
-              activeOpacity={0.7}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              accessibilityLabel="Terms and Conditions"
-            >
-              <AppIcon name="terms-conditions" size={19} color="#334155" />
-            </TouchableOpacity>
-
             {/* Global Notification Bell Icon (Left of Logout) */}
             <TouchableOpacity
               style={styles.bellButton}
@@ -2019,7 +2367,10 @@ export const UnifiedDashboardScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.kpiTile}
                 activeOpacity={0.8}
-                onPress={() => navigate('SiteUnits')}
+                onPress={() => {
+                  console.log('[Dashboard] 🔘 KPI Tile Clicked: "Total Units" -> Navigating to: SiteUnits');
+                  navigate('SiteUnits');
+                }}
               >
                 <View style={styles.kpiTop}>
                   <Text style={styles.kpiLabel} numberOfLines={1} adjustsFontSizeToFit>Total Units</Text>
@@ -2556,7 +2907,10 @@ export const UnifiedDashboardScreen: React.FC = () => {
                 key={card.id}
                 style={styles.featureCard}
                 activeOpacity={0.75}
-                onPress={() => navigate(card.targetScreen)}
+                onPress={() => {
+                  console.log(`[Dashboard] 🔘 Feature Card Clicked: "${card.title}" (${card.id}) -> Navigating to: ${card.targetScreen}`);
+                  navigate(card.targetScreen);
+                }}
               >
                 <View style={[styles.cardIconWrap, { backgroundColor: card.bgColor }]}>
                   <AppIcon name={card.icon} size={20} color={card.iconColor} />

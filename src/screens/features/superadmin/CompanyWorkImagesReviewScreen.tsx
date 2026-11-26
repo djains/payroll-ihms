@@ -28,6 +28,17 @@ import { colors } from '../../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// In-memory instant cache for today's company work image records
+export const companyWorkImagesReviewCache: {
+  dateFormatted: string;
+  records: WorkImageRecord[];
+  timestamp: number;
+} = {
+  dateFormatted: '',
+  records: [],
+  timestamp: 0,
+};
+
 export interface WorkImageRecord {
   id?: number | string;
   emp_code?: string;
@@ -98,9 +109,16 @@ export const CompanyWorkImagesReviewScreen: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth()); // 0-indexed
   const [selectedDay, setSelectedDay] = useState<number>(now.getDate());
 
-  const [loading, setLoading] = useState<boolean>(true);
+  const todayFormatted = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+  const hasCachedToday =
+    companyWorkImagesReviewCache.dateFormatted === todayFormatted &&
+    companyWorkImagesReviewCache.records.length > 0;
+
+  const [loading, setLoading] = useState<boolean>(!hasCachedToday);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [records, setRecords] = useState<WorkImageRecord[]>([]);
+  const [records, setRecords] = useState<WorkImageRecord[]>(
+    hasCachedToday ? companyWorkImagesReviewCache.records : []
+  );
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
@@ -293,6 +311,11 @@ export const CompanyWorkImagesReviewScreen: React.FC = () => {
       }
 
       setRecords(fetchedList);
+      if (dateFormatted === todayFormatted) {
+        companyWorkImagesReviewCache.dateFormatted = todayFormatted;
+        companyWorkImagesReviewCache.records = fetchedList;
+        companyWorkImagesReviewCache.timestamp = Date.now();
+      }
     } catch (err: any) {
       console.warn('[CompanyWorkImagesReview] Error fetching work photos:', err);
       setErrorMsg(err?.message || 'Could not load work image logs.');
@@ -478,35 +501,38 @@ export const CompanyWorkImagesReviewScreen: React.FC = () => {
 
       {/* ── 2b. CATEGORY FILTERS ROW ── */}
       {records.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={uiStyles.catFilterContainer}
-        >
-          {CATEGORY_FILTERS.map((cat) => {
-            const isSel = selectedCategoryFilter === cat;
-            return (
-              <TouchableOpacity
-                key={`cat-${cat}`}
-                onPress={() => setSelectedCategoryFilter(cat)}
-                style={[
-                  uiStyles.catFilterPill,
-                  isSel && { backgroundColor: brandColor, borderColor: brandColor },
-                ]}
-                activeOpacity={0.75}
-              >
-                <Text
+        <View style={uiStyles.catFilterWrapper}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={uiStyles.catFilterScroll}
+            contentContainerStyle={uiStyles.catFilterContainer}
+          >
+            {CATEGORY_FILTERS.map((cat) => {
+              const isSel = selectedCategoryFilter === cat;
+              return (
+                <TouchableOpacity
+                  key={`cat-${cat}`}
+                  onPress={() => setSelectedCategoryFilter(cat)}
                   style={[
-                    uiStyles.catFilterText,
-                    isSel && { color: '#FFFFFF', fontWeight: '700' },
+                    uiStyles.catFilterPill,
+                    isSel && { backgroundColor: brandColor, borderColor: brandColor },
                   ]}
+                  activeOpacity={0.75}
                 >
-                  {cat === 'ALL' ? 'All Proofs' : cat}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+                  <Text
+                    style={[
+                      uiStyles.catFilterText,
+                      isSel && { color: '#FFFFFF', fontWeight: '700' },
+                    ]}
+                  >
+                    {cat === 'ALL' ? 'All Proofs' : cat}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
       )}
 
       {/* ── 2c. EMPLOYEE SEARCH BAR ── */}
@@ -860,19 +886,30 @@ const uiStyles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  catFilterWrapper: {
+    height: 40,
+    marginBottom: 12,
+    justifyContent: 'center',
+  },
+  catFilterScroll: {
+    flexGrow: 0,
+    height: 38,
+  },
   catFilterContainer: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
-    paddingVertical: 2,
+    paddingVertical: 0,
   },
   catFilterPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    height: 34,
+    paddingHorizontal: 14,
+    borderRadius: 17,
     backgroundColor: '#FFFFFF',
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   catFilterText: {
     fontSize: 12,

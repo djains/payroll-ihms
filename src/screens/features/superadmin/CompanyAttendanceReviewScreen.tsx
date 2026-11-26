@@ -28,6 +28,17 @@ import { colors } from '../../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
+// In-memory instant cache for today's company attendance records
+export const companyAttendanceReviewCache: {
+  dateFormatted: string;
+  records: AttendancePunchRecord[];
+  timestamp: number;
+} = {
+  dateFormatted: '',
+  records: [],
+  timestamp: 0,
+};
+
 interface AttendancePunchRecord {
   emp_code: string;
   EMP_NAME: string;
@@ -90,9 +101,16 @@ export const CompanyAttendanceReviewScreen: React.FC = () => {
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth()); // 0-indexed
   const [selectedDay, setSelectedDay] = useState<number>(now.getDate());
 
-  const [loading, setLoading] = useState<boolean>(true);
+  const todayFormatted = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+  const hasCachedToday =
+    companyAttendanceReviewCache.dateFormatted === todayFormatted &&
+    companyAttendanceReviewCache.records.length > 0;
+
+  const [loading, setLoading] = useState<boolean>(!hasCachedToday);
   const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [records, setRecords] = useState<AttendancePunchRecord[]>([]);
+  const [records, setRecords] = useState<AttendancePunchRecord[]>(
+    hasCachedToday ? companyAttendanceReviewCache.records : []
+  );
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -171,6 +189,11 @@ export const CompanyAttendanceReviewScreen: React.FC = () => {
           ? res.data
           : res.data.results || [];
         setRecords(list);
+        if (dateFormatted === todayFormatted) {
+          companyAttendanceReviewCache.dateFormatted = todayFormatted;
+          companyAttendanceReviewCache.records = list;
+          companyAttendanceReviewCache.timestamp = Date.now();
+        }
       } else {
         // Fallback: If portal logs returns empty or 403, try generic android-logs
         const altUrl = `/api/attendance/android-logs/?date_time__date=${yStr}-${mStr}-${dStr}`;
@@ -178,6 +201,11 @@ export const CompanyAttendanceReviewScreen: React.FC = () => {
         if (altRes.success && altRes.data) {
           const altList = Array.isArray(altRes.data) ? altRes.data : altRes.data.results || [];
           setRecords(altList);
+          if (dateFormatted === todayFormatted) {
+            companyAttendanceReviewCache.dateFormatted = todayFormatted;
+            companyAttendanceReviewCache.records = altList;
+            companyAttendanceReviewCache.timestamp = Date.now();
+          }
         } else {
           setRecords([]);
           if (res.error) {

@@ -376,7 +376,8 @@ export const styles = StyleSheet.create({
     borderTopRightRadius: ms(24),
     paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
-    maxHeight: '75%',
+    height: '75%',
+    maxHeight: '85%',
   },
   pickerItem: {
     flexDirection: 'row',
