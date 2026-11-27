@@ -28,6 +28,9 @@ import {
   CustomAlertButton,
 } from '../../../components/common';
 import { useNavigation } from '../../../navigation/navigationContext';
+import { WebView } from 'react-native-webview';
+
+const WebViewComponent: any = WebView;
 import { apiClient, staffApi, superadminApi, API_ENDPOINTS } from '../../../api';
 import { showToast } from '../../../store/toastStore';
 
@@ -208,6 +211,174 @@ const resolveWorkerPunchInfo = (logs: any[]) => {
   };
 };
 
+interface MapRoutePoint {
+  id: string;
+  label: string;
+  title: string;
+  type: 'start' | 'waypoint' | 'end';
+  lat: number;
+  lng: number;
+  time: string;
+  address: string;
+}
+
+const generateRouteMapHtml = (points: MapRoutePoint[]): string => {
+  if (!points || points.length === 0) {
+    return `<!DOCTYPE html><html><body style="display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-family:sans-serif;color:#64748B;background:#F8FAFC;"><p style="font-size:12px;font-weight:700;">No coordinates to plot</p></body></html>`;
+  }
+
+  const safePointsJson = JSON.stringify(
+    points.map((p) => ({
+      label: p.label,
+      title: p.title,
+      type: p.type,
+      lat: p.lat,
+      lng: p.lng,
+      time: p.time,
+      address: (p.address || '').replace(/"/g, "'"),
+    }))
+  );
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body, #map { width: 100%; height: 100%; background: #F8FAFC; }
+    .custom-pin {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      color: #FFFFFF;
+      font-weight: 800;
+      font-size: 11px;
+      font-family: system-ui, -apple-system, sans-serif;
+      box-shadow: 0 3px 8px rgba(0,0,0,0.32);
+      border: 2px solid #FFFFFF;
+    }
+    .pin-start {
+      background: linear-gradient(135deg, #10B981, #047857);
+      width: 28px;
+      height: 28px;
+    }
+    .pin-waypoint {
+      background: linear-gradient(135deg, #3B82F6, #1D4ED8);
+      width: 24px;
+      height: 24px;
+      font-size: 10px;
+    }
+    .pin-end {
+      background: linear-gradient(135deg, #EF4444, #B91C1C);
+      width: 28px;
+      height: 28px;
+    }
+    .leaflet-popup-content-wrapper {
+      border-radius: 10px;
+      padding: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    .popup-box {
+      font-size: 12px;
+      line-height: 1.4;
+      color: #1E293B;
+    }
+    .popup-title {
+      font-weight: 800;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+    .popup-time {
+      font-weight: 700;
+      color: #2563EB;
+      margin-bottom: 3px;
+      font-size: 11px;
+    }
+    .popup-addr {
+      color: #64748B;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    var points = ${safePointsJson};
+    var map = L.map('map', {
+      zoomControl: false,
+      attributionControl: false
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19
+    }).addTo(map);
+
+    var latlngs = [];
+    var markers = [];
+
+    points.forEach(function(p) {
+      var ll = [p.lat, p.lng];
+      latlngs.push(ll);
+
+      var pinClass = 'custom-pin ';
+      if (p.type === 'start') {
+        pinClass += 'pin-start';
+      } else if (p.type === 'end') {
+        pinClass += 'pin-end';
+      } else {
+        pinClass += 'pin-waypoint';
+      }
+
+      var icon = L.divIcon({
+        className: '',
+        html: '<div class="' + pinClass + '">' + p.label + '</div>',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -14]
+      });
+
+      var marker = L.marker(ll, { icon: icon }).addTo(map);
+      var popupHtml = '<div class="popup-box">' +
+        '<div class="popup-title">' + p.title + '</div>' +
+        (p.time ? '<div class="popup-time">🕒 ' + p.time + '</div>' : '') +
+        (p.address ? '<div class="popup-addr">📍 ' + p.address + '</div>' : '') +
+        '</div>';
+      marker.bindPopup(popupHtml);
+      markers.push(marker);
+    });
+
+    if (latlngs.length > 1) {
+      // Border line
+      L.polyline(latlngs, {
+        color: '#1E40AF',
+        weight: 6,
+        opacity: 0.25
+      }).addTo(map);
+
+      // Main route polyline
+      L.polyline(latlngs, {
+        color: '#2563EB',
+        weight: 3.5,
+        opacity: 0.9,
+        dashArray: '8, 6'
+      }).addTo(map);
+
+      var bounds = L.latLngBounds(latlngs);
+      map.fitBounds(bounds, { padding: [35, 35], maxZoom: 17 });
+    } else if (latlngs.length === 1) {
+      map.setView(latlngs[0], 16);
+      markers[0].openPopup();
+    }
+  </script>
+</body>
+</html>`;
+};
+
 export const WorkersListScreen: React.FC = () => {
   const { goBack, navigate } = useNavigation();
   const insets = useSafeAreaInsets();
@@ -271,6 +442,7 @@ export const WorkersListScreen: React.FC = () => {
   const [trackingError, setTrackingError] = useState<string | null>(null);
   const [todayPunchStatus, setTodayPunchStatus] = useState<'not_punched' | 'active' | 'ended' | null>(null);
   const [todayPunchLabel, setTodayPunchLabel] = useState<string>('');
+  const [todayPunchRecord, setTodayPunchRecord] = useState<any | null>(null);
   const [resolvedAddressesMap, setResolvedAddressesMap] = useState<Record<string, string>>({});
 
   // Custom Global Alert State
@@ -628,7 +800,7 @@ export const WorkersListScreen: React.FC = () => {
         const todayDash = `${yyyy}-${mm}-${dd}`;
         const todaySlash = `${dd}/${mm}/${yyyy}`;
 
-        const todayPunch = Array.isArray(pLogs)
+        let todayPunch = Array.isArray(pLogs)
           ? pLogs.find((log: any) => {
               const raw = String(
                 log.date_time || log.Date_Time || log.attendances_intime || log.camera_intime || ''
@@ -636,6 +808,23 @@ export const WorkersListScreen: React.FC = () => {
               return raw.startsWith(todayDash) || raw.includes(todaySlash);
             })
           : null;
+
+        // Night shift lookback: check yesterday's log if today's is not yet recorded
+        if (!todayPunch && Array.isArray(pLogs)) {
+          const yest = new Date();
+          yest.setDate(yest.getDate() - 1);
+          const yDash = `${yest.getFullYear()}-${String(yest.getMonth() + 1).padStart(2, '0')}-${String(yest.getDate()).padStart(2, '0')}`;
+          const ySlash = `${String(yest.getDate()).padStart(2, '0')}/${String(yest.getMonth() + 1).padStart(2, '0')}/${yest.getFullYear()}`;
+          const yestPunch = pLogs.find((log: any) => {
+            const raw = String(log.date_time || log.Date_Time || log.attendances_intime || log.camera_intime || '').trim();
+            return raw.startsWith(yDash) || raw.includes(ySlash);
+          });
+          if (yestPunch) {
+            todayPunch = yestPunch;
+          }
+        }
+
+        setTodayPunchRecord(todayPunch);
 
         if (todayPunch) {
           const rawIn =
@@ -654,11 +843,31 @@ export const WorkersListScreen: React.FC = () => {
             setTodayPunchStatus('not_punched');
             setTodayPunchLabel('Not Punched In Today');
           }
+
+          // Reverse geocode Punch-In coordinates if address is generic or short
+          const pLat = String(todayPunch.EMP_LATITUDE || todayPunch.latitude || todayPunch.cur_latitude || '').trim();
+          const pLon = String(todayPunch.EMP_LONGTUTDE || todayPunch.EMP_LONGITUDE || todayPunch.longitude || todayPunch.cur_longtitude || '').trim();
+          const pAddr = String(todayPunch.unit_empaddress || todayPunch.EMP_ADDRESS || todayPunch.address || '').trim();
+          if (pLat && pLon && (!pAddr || pAddr.length < 15)) {
+            const pKey = `${pLat},${pLon}`;
+            fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(pLat)}&lon=${encodeURIComponent(pLon)}&zoom=18&addressdetails=1`,
+              { headers: { 'User-Agent': 'IHMS-Mobile-App/1.0' } }
+            )
+              .then((r) => r.json())
+              .then((gj) => {
+                if (gj?.display_name) {
+                  setResolvedAddressesMap((prev) => ({ ...prev, [pKey]: String(gj.display_name) }));
+                }
+              })
+              .catch(() => {});
+          }
         } else {
           setTodayPunchStatus('not_punched');
           setTodayPunchLabel('Not Punched In Today');
         }
       } else {
+        setTodayPunchRecord(null);
         setTodayPunchStatus('not_punched');
         setTodayPunchLabel('Not Punched In Today');
       }
@@ -721,11 +930,163 @@ export const WorkersListScreen: React.FC = () => {
     setSelectedWorkerForTracking(worker);
     setTrackingDaysRange(1);
     setTrackingLogs([]);
+    setTodayPunchRecord(null);
     setTodayPunchStatus(null);
     setTodayPunchLabel('');
     setTrackingModalVisible(true);
     fetchWorkerLiveTracking(worker, 1);
   };
+
+  // Compute Route Points (A ➔ B ➔ C ➔ End) from Punch-In and GPS tracking pings
+  const routePoints = useMemo<MapRoutePoint[]>(() => {
+    const pts: MapRoutePoint[] = [];
+
+    // 1. Point A (Punch-In Location)
+    let hasPointA = false;
+    if (todayPunchRecord) {
+      const latVal = parseFloat(
+        todayPunchRecord.EMP_LATITUDE ||
+        todayPunchRecord.latitude ||
+        todayPunchRecord.cur_latitude ||
+        todayPunchRecord.in_latitude ||
+        '0'
+      );
+      const lngVal = parseFloat(
+        todayPunchRecord.EMP_LONGTUTDE ||
+        todayPunchRecord.EMP_LONGITUDE ||
+        todayPunchRecord.longitude ||
+        todayPunchRecord.cur_longtitude ||
+        todayPunchRecord.in_longitude ||
+        '0'
+      );
+      if (!isNaN(latVal) && !isNaN(lngVal) && latVal !== 0 && lngVal !== 0) {
+        const inTimeStr = formatPunchTime(
+          todayPunchRecord.camera_intime ||
+          todayPunchRecord.Camera_intime ||
+          todayPunchRecord.attendances_intime ||
+          todayPunchRecord.in_time ||
+          todayPunchRecord.date_time
+        );
+        const resolvedAddr =
+          resolvedAddressesMap[`${latVal},${lngVal}`] ||
+          todayPunchRecord.unit_empaddress ||
+          todayPunchRecord.EMP_ADDRESS ||
+          todayPunchRecord.address ||
+          'Punch-In Site';
+        pts.push({
+          id: 'point-a',
+          label: 'A',
+          title: 'Point A • Punch-In',
+          type: 'start',
+          lat: latVal,
+          lng: lngVal,
+          time: inTimeStr || 'Punch-In',
+          address: resolvedAddr,
+        });
+        hasPointA = true;
+      }
+    }
+
+    // 2. Intermediate tracking pings (sorted oldest to newest)
+    const validPings = trackingLogs
+      .filter((r: any) => {
+        const lt = parseFloat(r.cur_latitude);
+        const lg = parseFloat(r.cur_longtitude);
+        return !isNaN(lt) && !isNaN(lg) && lt !== 0 && lg !== 0;
+      })
+      .slice()
+      .reverse();
+
+    // Deduplicate pings that are at the exact same location (< 15 meters)
+    const filteredPings: any[] = [];
+    validPings.forEach((ping) => {
+      const pLat = parseFloat(ping.cur_latitude);
+      const pLng = parseFloat(ping.cur_longtitude);
+      const last = filteredPings[filteredPings.length - 1];
+      if (!last) {
+        if (hasPointA && pts[0]) {
+          const distFromA = Math.hypot(pLat - pts[0].lat, pLng - pts[0].lng);
+          if (distFromA < 0.00015) return;
+        }
+        filteredPings.push(ping);
+      } else {
+        const lastLat = parseFloat(last.cur_latitude);
+        const lastLng = parseFloat(last.cur_longtitude);
+        const diff = Math.hypot(pLat - lastLat, pLng - lastLng);
+        if (diff >= 0.00015) {
+          filteredPings.push(ping);
+        }
+      }
+    });
+
+    const alphabet = 'BCDEFGHIJKLMNOPQRSTUVWXYZ';
+    filteredPings.forEach((ping, idx) => {
+      const pLat = parseFloat(ping.cur_latitude);
+      const pLng = parseFloat(ping.cur_longtitude);
+      const isLast = idx === filteredPings.length - 1;
+      const letter = alphabet[idx % alphabet.length] || `W${idx + 1}`;
+      const pingTime = formatPunchTime(ping.cur_date || ping.date_time || ping.cur_time) || ping.cur_date || '';
+      const pingAddr =
+        resolvedAddressesMap[`${pLat},${pLng}`] ||
+        ping.cur_address ||
+        'Tracking Waypoint';
+
+      if (isLast && filteredPings.length > 0) {
+        pts.push({
+          id: `point-${idx}`,
+          label: todayPunchStatus === 'ended' ? 'End' : letter,
+          title: todayPunchStatus === 'ended' ? 'Point End • Punch-Out' : `Current Location (${letter})`,
+          type: 'end',
+          lat: pLat,
+          lng: pLng,
+          time: pingTime,
+          address: pingAddr,
+        });
+      } else {
+        pts.push({
+          id: `point-${idx}`,
+          label: letter,
+          title: `Waypoint ${letter}`,
+          type: 'waypoint',
+          lat: pLat,
+          lng: pLng,
+          time: pingTime,
+          address: pingAddr,
+        });
+      }
+    });
+
+    // Fallback: If Point A wasn't in punch log but we have tracking pings, first ping is Point A
+    if (!hasPointA && pts.length > 0) {
+      pts[0].label = 'A';
+      pts[0].title = 'Point A • Start / First Ping';
+      pts[0].type = 'start';
+    }
+
+    return pts;
+  }, [todayPunchRecord, trackingLogs, resolvedAddressesMap, todayPunchStatus]);
+
+  // Compute total route distance in km
+  const routeDistanceKm = useMemo(() => {
+    if (routePoints.length < 2) return 0;
+    let total = 0;
+    for (let i = 0; i < routePoints.length - 1; i++) {
+      const p1 = routePoints[i];
+      const p2 = routePoints[i + 1];
+      const R = 6371;
+      const dLat = ((p2.lat - p1.lat) * Math.PI) / 180;
+      const dLon = ((p2.lng - p1.lng) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((p1.lat * Math.PI) / 180) *
+          Math.cos((p2.lat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      total += R * c;
+    }
+    return Math.round(total * 10) / 10;
+  }, [routePoints]);
 
   const handleOpenSendSalarySlip = async (worker: WorkerItem) => {
     setSelectedWorkerForSlip(worker);
@@ -1532,7 +1893,7 @@ NG GLOBAL Administration`,
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Live Tracking History Modal (SQL pay_geolocation_address) */}
+      {/* Live Route Map Modal (SQL pay_geolocation_address + Leaflet Route Map) */}
       <Modal
         visible={trackingModalVisible}
         animationType="slide"
@@ -1540,106 +1901,55 @@ NG GLOBAL Administration`,
         onRequestClose={() => setTrackingModalVisible(false)}
       >
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 16, maxHeight: '85%' }]}>
+          <View style={[styles.modalContent, { paddingBottom: insets.bottom + 16, maxHeight: '94%' }]}>
             <View style={styles.modalHeader}>
-              <View style={{ flex: 1, paddingRight: 10 }}>
-                <Text style={styles.modalTitle}>Live Tracking History</Text>
+              <View style={{ flex: 1, paddingRight: 8 }}>
+                <Text style={styles.modalTitle}>Live Shift Route Tracking</Text>
                 <Text style={{ fontSize: 11, color: '#64748B', fontWeight: '700', marginTop: 2 }}>
                   {selectedWorkerForTracking?.emp_name} ({selectedWorkerForTracking?.emp_code}) • Unit: {selectedWorkerForTracking?.unit_code || '—'}
                 </Text>
               </View>
-              <TouchableOpacity
-                onPress={() => setTrackingModalVisible(false)}
-                style={styles.modalCloseBtn}
-              >
-                <AppIcon name="close" size={16} color="#0F766E" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Date Range Filter Chips + Refresh */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 10, marginBottom: 10 }}>
-              <View style={{ flexDirection: 'row', gap: 6 }}>
-                <View
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    if (selectedWorkerForTracking) {
+                      fetchWorkerLiveTracking(selectedWorkerForTracking, trackingDaysRange);
+                    }
+                  }}
                   style={{
-                    paddingHorizontal: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    paddingHorizontal: 10,
                     paddingVertical: 6,
-                    borderRadius: 16,
-                    backgroundColor: '#1D4ED8',
+                    borderRadius: 8,
+                    backgroundColor: '#ECFDF5',
                     borderWidth: 1,
-                    borderColor: '#1D4ED8',
+                    borderColor: '#A7F3D0',
                   }}
                 >
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>Today</Text>
-                </View>
+                  <AppIcon name="refresh" size={12} color="#047857" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>Refresh</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setTrackingModalVisible(false)}
+                  style={styles.modalCloseBtn}
+                >
+                  <AppIcon name="close" size={16} color="#0F766E" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={() => {
-                  if (selectedWorkerForTracking) {
-                    fetchWorkerLiveTracking(selectedWorkerForTracking, trackingDaysRange);
-                  }
-                }}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  paddingHorizontal: 10,
-                  paddingVertical: 6,
-                  borderRadius: 16,
-                  backgroundColor: '#ECFDF5',
-                  borderWidth: 1,
-                  borderColor: '#A7F3D0',
-                }}
-              >
-                <AppIcon name="refresh" size={12} color="#047857" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>Refresh</Text>
-              </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 16 }}>
-              {todayPunchStatus && !loadingTracking && (
-                <View
-                  style={{
-                    paddingHorizontal: 12,
-                    paddingVertical: 9,
-                    borderRadius: 10,
-                    marginBottom: 10,
-                    borderWidth: 1,
-                    backgroundColor:
-                      todayPunchStatus === 'active'
-                        ? '#ECFDF5'
-                        : todayPunchStatus === 'ended'
-                        ? '#F1F5F9'
-                        : '#FEF3C7',
-                    borderColor:
-                      todayPunchStatus === 'active'
-                        ? '#A7F3D0'
-                        : todayPunchStatus === 'ended'
-                        ? '#CBD5E1'
-                        : '#FDE68A',
-                  }}
-                >
-                  <Text
-                    style={{
-                      fontSize: 12,
-                      fontWeight: '800',
-                      color:
-                        todayPunchStatus === 'active'
-                          ? '#047857'
-                          : todayPunchStatus === 'ended'
-                          ? '#334155'
-                          : '#B45309',
-                    }}
-                  >
-                    {todayPunchLabel || 'Not Punched In Today'}
-                  </Text>
-                </View>
-              )}
-
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              nestedScrollEnabled={true}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 32, paddingTop: 4 }}
+            >
               {loadingTracking ? (
                 <View style={{ paddingVertical: 40, alignItems: 'center' }}>
                   <ActivityIndicator size="large" color="#1D4ED8" />
                   <Text style={{ marginTop: 10, fontSize: 12, color: '#64748B', fontWeight: '600' }}>
-                    Fetching live GPS pings from SQL...
+                    Fetching live GPS records & constructing path...
                   </Text>
                 </View>
               ) : trackingError ? (
@@ -1647,79 +1957,96 @@ NG GLOBAL Administration`,
                   <Text style={{ fontSize: 12, fontWeight: '700', color: '#B91C1C' }}>Error Loading Tracking</Text>
                   <Text style={{ fontSize: 11, color: '#7F1D1D', marginTop: 4 }}>{trackingError}</Text>
                 </View>
-              ) : trackingLogs.length === 0 ? (
+              ) : routePoints.length === 0 ? (
                 <View style={{ paddingVertical: 36, alignItems: 'center' }}>
                   <AppIcon name="location" size={32} color="#94A3B8" />
                   <Text style={{ marginTop: 10, fontSize: 14, fontWeight: '700', color: '#334155' }}>
                     {todayPunchStatus === 'not_punched'
                       ? 'Not Punched In Today'
-                      : 'No Live Tracking Pings Found'}
+                      : 'No GPS Route Coordinates'}
                   </Text>
                   <Text style={{ marginTop: 4, fontSize: 11, color: '#64748B', textAlign: 'center', paddingHorizontal: 16 }}>
                     {todayPunchStatus === 'not_punched'
-                      ? 'Worker has not punched in today. Live tracking pings will appear once they punch in.'
-                      : 'No GPS pings recorded in SQL (pay_geolocation_address) for this worker in the selected period.'}
+                      ? 'Worker has not punched in today. Route map from Punch-In to latest location will appear once they punch in.'
+                      : 'No GPS coordinates were captured for today. Movement pings will plot here automatically.'}
                   </Text>
                 </View>
               ) : (
-                trackingLogs.map((log: any, idx: number) => {
-                  const latVal = String(log.cur_latitude || '').trim();
-                  const lonVal = String(log.cur_longtitude || '').trim();
-                  const hasCoords = Boolean(latVal && lonVal);
-                  const displayAddress =
-                    (hasCoords && resolvedAddressesMap[`${latVal},${lonVal}`]) ||
-                    log.cur_address ||
-                    'Address not captured';
-                  return (
-                    <View
-                      key={log.id ?? idx}
-                      style={{
-                        backgroundColor: idx === 0 ? '#EFF6FF' : '#F8FAFC',
-                        borderWidth: 1,
-                        borderColor: idx === 0 ? '#BFDBFE' : '#E2E8F0',
-                        borderRadius: 12,
-                        padding: 12,
-                        marginBottom: 10,
-                      }}
-                    >
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                        <Text style={{ fontSize: 11, fontWeight: '800', color: idx === 0 ? '#1D4ED8' : '#0F172A' }}>
-                          {idx === 0 ? 'LATEST PING • ' : ''}{log.cur_date || '—'}
-                        </Text>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#64748B' }}>
-                          Unit: {log.unit_code || '—'}
-                        </Text>
-                      </View>
-                      <Text style={{ fontSize: 12, color: '#334155', fontWeight: '600', marginBottom: 6 }}>
-                        {displayAddress}
+                <View>
+                  {/* Clean 3-Metric Bar: Start | Latest | Distance */}
+                  <View style={styles.trackingMetricsRow}>
+                    <View style={styles.trackingMetricCard}>
+                      <Text style={styles.trackingMetricLabel}>Start</Text>
+                      <Text style={styles.trackingMetricVal} numberOfLines={1} adjustsFontSizeToFit>
+                        {routePoints[0]?.time || 'IN'}
                       </Text>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text style={{ fontSize: 11, color: '#475569', fontWeight: '700' }}>
-                          {hasCoords ? `GPS: ${latVal}, ${lonVal}` : 'GPS: —'}
-                        </Text>
-                        {hasCoords && (
-                          <TouchableOpacity
-                            onPress={() => {
-                              Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${latVal},${lonVal}`)}`);
-                            }}
-                            style={{
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              gap: 4,
-                              backgroundColor: '#1D4ED8',
-                              paddingHorizontal: 10,
-                              paddingVertical: 5,
-                              borderRadius: 8,
-                            }}
-                          >
-                            <AppIcon name="location" size={11} color="#FFFFFF" />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>Open Map</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
                     </View>
-                  );
-                })
+                    <View style={styles.trackingMetricCard}>
+                      <Text style={styles.trackingMetricLabel}>Latest</Text>
+                      <Text style={styles.trackingMetricVal} numberOfLines={1} adjustsFontSizeToFit>
+                        {routePoints[routePoints.length - 1]?.time || (todayPunchStatus === 'ended' ? 'OUT' : 'Active')}
+                      </Text>
+                    </View>
+                    <View style={styles.trackingMetricCard}>
+                      <Text style={styles.trackingMetricLabel}>Distance</Text>
+                      <Text style={[styles.trackingMetricVal, { color: '#1D4ED8' }]} numberOfLines={1} adjustsFontSizeToFit>
+                        {routeDistanceKm} km
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Interactive Leaflet Route Map */}
+                  <View style={styles.trackingMapContainer}>
+                    <WebViewComponent
+                      originWhitelist={['*']}
+                      source={{ html: generateRouteMapHtml(routePoints), baseUrl: 'https://localhost' }}
+                      style={styles.trackingMapWebView}
+                      javaScriptEnabled={true}
+                      domStorageEnabled={true}
+                    />
+                  </View>
+
+                  {/* Sequential Route Milestones Breakdown */}
+                  <View style={styles.trackingRouteSummaryBox}>
+                    <Text style={styles.trackingRoutePathTitle}>
+                      Sequential Route Path (A ➔ B ➔ C ➔ End)
+                    </Text>
+                    {routePoints.map((pt, idx) => (
+                      <View key={pt.id || idx} style={styles.trackingMilestoneCard}>
+                        <View
+                          style={[
+                            styles.trackingMilestoneBadge,
+                            {
+                              backgroundColor:
+                                pt.type === 'start'
+                                    ? '#10B981'
+                                    : pt.type === 'end'
+                                    ? '#EF4444'
+                                    : '#3B82F6',
+                            },
+                          ]}
+                        >
+                          <Text style={styles.trackingMilestoneBadgeText}>{pt.label}</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#0F172A' }} numberOfLines={1}>
+                              {pt.title}
+                            </Text>
+                            {pt.time ? (
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563EB', marginLeft: 8 }} numberOfLines={1}>
+                                {pt.time}
+                              </Text>
+                            ) : null}
+                          </View>
+                          <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }} numberOfLines={2}>
+                            {pt.address}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                </View>
               )}
             </ScrollView>
           </View>

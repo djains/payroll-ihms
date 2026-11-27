@@ -477,7 +477,19 @@ export const CompanyAttendanceReviewScreen: React.FC = () => {
                   </Text>
                 </View>
                 <View style={uiStyles.empDetailsWrap}>
-                  <Text style={uiStyles.empNameText}>{item.EMP_NAME || 'Staff Member'}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={uiStyles.empNameText}>{item.EMP_NAME || 'Staff Member'}</Text>
+                    {String(item.address || '').toUpperCase().startsWith('[WFH]') && (
+                      <View style={{ backgroundColor: '#EFF6FF', borderColor: '#93C5FD', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#1D4ED8' }}>🏠 WFH</Text>
+                      </View>
+                    )}
+                    {String(item.address || '').toUpperCase().startsWith('[OFFSITE]') && (
+                      <View style={{ backgroundColor: '#FFFBEB', borderColor: '#FCD34D', borderWidth: 1, paddingHorizontal: 6, paddingVertical: 1, borderRadius: 6 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#B45309' }}>🚗 OFFSITE</Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={uiStyles.empCodeBadge}>
                     Code: {item.emp_code} • Unit: {item.unit_name || item.unit_code || 'Site'}
                   </Text>

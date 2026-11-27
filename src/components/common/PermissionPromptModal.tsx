@@ -65,7 +65,11 @@ export const PermissionPromptModal: React.FC = () => {
     if (Platform.OS === 'android') {
       const bgGranted = await checkBackgroundPermission();
       if (!bgGranted) {
-        await requestBackgroundPermission();
+        const granted = await requestBackgroundPermission();
+        if (!granted) {
+          // If user picked "Only while using the app" or OS bypassed direct prompt, open settings
+          await openAppSettings();
+        }
       }
     }
   };
@@ -207,8 +211,18 @@ export const PermissionPromptModal: React.FC = () => {
                         </View>
                       </View>
                       <Text style={styles.itemDescription}>
-                        Keeps live shift & geofence tracking active during duty hours even when phone screen is locked.
+                        Verifies presence inside the client site boundary during active duty shift, even when screen is locked or app is closed.
                       </Text>
+                      {!isBackgroundGranted && (
+                        <View style={styles.bgInstructionBox}>
+                          <Text style={styles.bgInstructionText}>
+                            👉 Step: Please select <Text style={styles.bgInstructionBold}>"Allow all the time"</Text> when prompted.
+                          </Text>
+                          <Text style={styles.bgPrivacyText}>
+                            🔒 Active only during duty shifts (Punch In to Punch Out) • Zero tracking outside duty hours.
+                          </Text>
+                        </View>
+                      )}
                     </View>
                   </View>
                 )}
@@ -246,6 +260,14 @@ export const PermissionPromptModal: React.FC = () => {
                       Alerts for shift rosters, branch duties, and leave approval updates.
                     </Text>
                   </View>
+                </View>
+
+                {/* Privacy Guarantee Strip */}
+                <View style={styles.privacyStrip}>
+                  <AppIcon name="check" size={12} color="#10B981" />
+                  <Text style={styles.privacyText}>
+                    Encrypted • No tracking outside duty hours • Zero data sharing
+                  </Text>
                 </View>
               </ScrollView>
 

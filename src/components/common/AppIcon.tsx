@@ -3760,6 +3760,115 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
+  // Edit / Pencil / Modify Icon (Sharp Precision Vector Pen)
+  if (name === 'edit' || name === 'pencil' || name === 'edit-2' || name === 'modify') {
+    const s = Math.max(14, scaledSize);
+    const penW = Math.max(4, Math.round(s * 0.26));
+    const penH = Math.max(8, Math.round(s * 0.52));
+    const lineStroke = Math.max(1.3, stroke * 0.85);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ transform: [{ rotate: '-45deg' }], alignItems: 'center' }}>
+          {/* Pen Barrel */}
+          <View
+            style={{
+              width: penW,
+              height: penH,
+              borderWidth: lineStroke,
+              borderColor: color,
+              borderTopLeftRadius: 1.5,
+              borderTopRightRadius: 1.5,
+              backgroundColor: 'transparent',
+            }}
+          />
+          {/* Pen Tip Point */}
+          <View
+            style={{
+              width: 0,
+              height: 0,
+              borderLeftWidth: penW / 2,
+              borderRightWidth: penW / 2,
+              borderTopWidth: penW * 0.7,
+              borderLeftColor: 'transparent',
+              borderRightColor: 'transparent',
+              borderTopColor: color,
+            }}
+          />
+        </View>
+        {/* Base underline */}
+        <View
+          style={{
+            position: 'absolute',
+            bottom: ms(1.5),
+            right: ms(1.5),
+            width: s * 0.42,
+            height: lineStroke,
+            backgroundColor: color,
+            borderRadius: 1,
+          }}
+        />
+      </View>
+    );
+  }
+
+  // Trash / Delete / Remove Icon (Crisp Precision Vector Bin)
+  if (name === 'trash' || name === 'delete' || name === 'trash-2' || name === 'bin') {
+    const s = Math.max(14, scaledSize);
+    const binW = Math.max(9, Math.round(s * 0.6));
+    const binH = Math.max(8, Math.round(s * 0.55));
+    const lidW = Math.max(12, Math.round(s * 0.8));
+    const handleW = Math.max(4, Math.round(s * 0.3));
+    const lineStroke = Math.max(1.3, stroke * 0.85);
+
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        {/* Top Handle */}
+        <View
+          style={{
+            width: handleW,
+            height: ms(2),
+            borderTopLeftRadius: ms(1.5),
+            borderTopRightRadius: ms(1.5),
+            borderWidth: lineStroke,
+            borderBottomWidth: 0,
+            borderColor: color,
+            marginBottom: 0.5,
+          }}
+        />
+        {/* Lid Horizontal Bar */}
+        <View
+          style={{
+            width: lidW,
+            height: lineStroke,
+            backgroundColor: color,
+            borderRadius: 0.5,
+            marginBottom: 1,
+          }}
+        />
+        {/* Bin Body Bucket */}
+        <View
+          style={{
+            width: binW,
+            height: binH,
+            borderWidth: lineStroke,
+            borderColor: color,
+            borderTopWidth: 0,
+            borderBottomLeftRadius: ms(2.5),
+            borderBottomRightRadius: ms(2.5),
+            flexDirection: 'row',
+            justifyContent: 'space-evenly',
+            alignItems: 'center',
+            paddingVertical: 1,
+          }}
+        >
+          {/* 2 Vertical Slits */}
+          <View style={{ width: lineStroke, height: '65%', backgroundColor: color, borderRadius: 0.5 }} />
+          <View style={{ width: lineStroke, height: '65%', backgroundColor: color, borderRadius: 0.5 }} />
+        </View>
+      </View>
+    );
+  }
+
   // Safe Default Vector Fallback (avoids missing-font '?' question mark box on Android)
   return (
     <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>

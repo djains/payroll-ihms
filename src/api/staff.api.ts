@@ -283,9 +283,7 @@ export const staffApi = {
    */
   async getSalaryDetails(empCode: string) {
     const url = `${API_ENDPOINTS.STAFF_SALARY_DETAILS}?emp_code=${encodeURIComponent(empCode)}`;
-    console.log('[API PAYLOAD REQ] Fetching MySQL Salary Details:', url);
     const res = await apiClient.get(url);
-    console.log('[API PAYLOAD RESP] MySQL Salary Response:', JSON.stringify(res, null, 2));
     return res;
   },
 
@@ -307,7 +305,6 @@ export const staffApi = {
     if (params.year) parts.push(`year=${encodeURIComponent(params.year)}`);
     const qs = parts.length > 0 ? `?${parts.join('&')}` : '';
     const url = `${API_ENDPOINTS.STAFF_SALARY_PRO_LIST}${qs}`;
-    console.log('[API PAYLOAD REQ] Fetching Approved Salary Pro List:', url);
     return apiClient.get(url);
   },
 
@@ -392,7 +389,6 @@ export const staffApi = {
     const m = month || String(new Date().getMonth() + 1);
     const y = year || String(new Date().getFullYear());
     const url = `${API_ENDPOINTS.MOBILE_MONTH_ATTENDANCE}?emp_code=${encodeURIComponent(empCode)}&month=${m}&year=${y}`;
-    console.log('[API PAYLOAD REQ] Fetching Mobile Attendance Logs:', url);
     const res = await apiClient.get(url, { 'X-API-Key': ANDROID_API_KEY });
     if (!res.success) {
       // Fallback to legacy endpoint if mobile endpoint fails
@@ -418,7 +414,11 @@ export const staffApi = {
    */
   async getUnitCoords(empCode: string) {
     const url = `${API_ENDPOINTS.MOBILE_UNIT_COORDS}?EMP_CODE=${encodeURIComponent(empCode)}`;
-    return apiClient.get(url, { 'X-API-Key': ANDROID_API_KEY });
+    console.log(`[API CALL] 🌐 GET ${url}`);
+    const res = await apiClient.get(url, { 'X-API-Key': ANDROID_API_KEY });
+    const count = Array.isArray(res.data) ? res.data.length : (res.data ? 1 : 0);
+    console.log(`[API RESPONSE] 📥 GET ${url} -> Success: ${res.success}, Records: ${count}`);
+    return res;
   },
 
   /**
@@ -434,7 +434,6 @@ export const staffApi = {
    */
   async getPolicyThresholds(empCode: string) {
     const url = `${API_ENDPOINTS.ATTENDANCE_LOGS}policy-thresholds/?emp_code=${encodeURIComponent(empCode)}`;
-    console.log('[API PAYLOAD REQ] Fetching MySQL Attendance Policy Thresholds:', url);
     return apiClient.get(url);
   },
 
@@ -444,7 +443,6 @@ export const staffApi = {
   async getEmployeeMusterHistory(unitCode: string, year: number, month?: number) {
     let url = `/api/attendance/attendance-history/employee/?unit_code=${encodeURIComponent(unitCode)}&year=${year}`;
     if (month) url += `&month=${month}`;
-    console.log('[API PAYLOAD REQ] Fetching Employee Muster History:', url);
     return apiClient.get(url);
   },
 
@@ -452,10 +450,14 @@ export const staffApi = {
    * Record Attendance Punch (Official Android Attendance Punch API)
    */
   async recordPunch(payload: AndroidPunchPayload) {
-    return apiClient.post(API_ENDPOINTS.ATTENDANCE_PUNCH, payload, {
+    const actionLabel = String(payload.attendances_click).toLowerCase().includes('in') ? 'SHIFT_IN' : 'SHIFT_OUT';
+    console.log(`[API CALL] 🚀 POST ${API_ENDPOINTS.ATTENDANCE_PUNCH} | Emp: ${payload.emp_code} | Action: ${actionLabel}`);
+    const res = await apiClient.post(API_ENDPOINTS.ATTENDANCE_PUNCH, payload, {
       'X-API-Key': ANDROID_API_KEY,
       'Content-Type': 'application/json',
     });
+    console.log(`[API RESPONSE] 📥 POST ${API_ENDPOINTS.ATTENDANCE_PUNCH} -> Success: ${res.success}`);
+    return res;
   },
 
   /**

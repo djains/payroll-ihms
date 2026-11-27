@@ -41,13 +41,16 @@ export const ProfileScreen: React.FC = () => {
   const empCode = currentUser?.empCode || currentUser?.username || '';
   const brandColor = currentCompany?.brandColor || colors.primary;
 
-  const [salaryInfo, setSalaryInfo] = useState<any | null>(cachedProfileData?.salaryInfo ?? null);
-  const [profileData, setProfileData] = useState<any | null>(cachedProfileData?.profileData ?? null);
+  // Strictly match cache to current empCode so previous user's data NEVER leaks
+  const validCache = cachedProfileData && cachedProfileData.empCode === empCode ? cachedProfileData : null;
+
+  const [salaryInfo, setSalaryInfo] = useState<any | null>(validCache?.salaryInfo ?? null);
+  const [profileData, setProfileData] = useState<any | null>(validCache?.profileData ?? null);
   const [profileScope, setProfileScope] = useState<any | null>(
-    (currentUser as any)?.scope || cachedProfileData?.profileScope || null
+    (currentUser as any)?.scope || validCache?.profileScope || null
   );
   const [avatarSource, setAvatarSource] = useState<any | null>(
-    cachedProfileData?.avatarSource ?? (currentUser?.avatarUrl ? { uri: currentUser.avatarUrl } : null)
+    validCache?.avatarSource ?? (currentUser?.avatarUrl ? { uri: currentUser.avatarUrl } : null)
   );
   const [avatarError, setAvatarError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -304,6 +307,7 @@ export const ProfileScreen: React.FC = () => {
   const loadProfileData = async () => {
     try {
       if (empCode) {
+        console.log(`[API CALL] 🌐 Profile Sync for emp_code=${empCode}`);
         const [salRes, meRes, userDetailsRes, hrEmployeesRes, kycRes, docsRes, modernDocsRes] = await Promise.allSettled([
           staffApi.getSalaryDetails(empCode),
           apiClient.request('/api/auth/me/'),
@@ -316,17 +320,20 @@ export const ProfileScreen: React.FC = () => {
           staffApi.getEmployeeDocuments(empCode),
         ]);
 
-        let newSal = salaryInfo;
-        let newScope = profileScope;
-        let newProf = profileData;
-        let newAvatar = avatarSource;
+        // Always start fresh for the current empCode so previous user's state never leaks
+        let newSal: any = null;
+        let newScope: any = (currentUser as any)?.scope || null;
+        let newProf: any = null;
+        let newAvatar: any = currentUser?.avatarUrl ? { uri: currentUser.avatarUrl } : null;
         let resolvedPhotoPath: string | null = null;
 
         // 1. Process HR Employees Master record from SQL (pay_employee_master)
         if (hrEmployeesRes.status === 'fulfilled' && hrEmployeesRes.value.success && hrEmployeesRes.value.data) {
           const raw = hrEmployeesRes.value.data;
           const list = Array.isArray(raw) ? raw : raw.results || [raw];
-          const match = list.find((e: any) => String(e.emp_code).toLowerCase() === empCode.toLowerCase());
+          const cleanEmp = empCode.trim().toLowerCase();
+          const match = list.find((e: any) => String(e.emp_code || '').trim().toLowerCase() === cleanEmp);
+          console.log(`[API RESPONSE] 📥 GET /api/hr/employees/?search=${empCode} -> Match: ${match ? match.emp_code : 'None'}`);
           if (match) {
             resolvedPhotoPath = match.photo || match.emp_photo || match.image || match.profile_image || null;
             newProf = {
@@ -372,8 +379,8 @@ export const ProfileScreen: React.FC = () => {
               company_name: uData.COMP_NAME || newProf?.company_name,
               shift_time: uData.SHIFT_TIME || newProf?.shift_time,
               emp_mobile_no: uData.EMP_MOBILE_NO || newProf?.emp_mobile_no,
-              unit_code: uData.COMP_CODE || newProf?.unit_code,
-              client_code: uData.UNIT_CODE || newProf?.client_code,
+              unit_code: uData.UNIT_CODE || newProf?.unit_code,
+              client_code: uData.CLIENT_CODE || newProf?.client_code,
               designation: newProf?.designation || uData.GRADE_CODE || 'Staff',
             };
             if (!isCompanyAdmin && currentUser && currentUser.name !== resolvedName) {
@@ -389,7 +396,8 @@ export const ProfileScreen: React.FC = () => {
         if (kycRes.status === 'fulfilled' && kycRes.value.success && kycRes.value.data) {
           const kRaw = kycRes.value.data;
           const kList = Array.isArray(kRaw) ? kRaw : (kRaw as any).results || [kRaw];
-          const kMatch = kList.find((k: any) => String(k.emp_code).toLowerCase() === empCode.toLowerCase()) || kList[0];
+          const cleanEmp = empCode.trim().toLowerCase();
+          const kMatch = kList.find((k: any) => String(k.emp_code || '').trim().toLowerCase() === cleanEmp);
           if (kMatch) {
             newProf = {
               ...newProf,
@@ -487,7 +495,8 @@ export const ProfileScreen: React.FC = () => {
             );
             if (logRes.success && logRes.data) {
               const lList = Array.isArray(logRes.data) ? logRes.data : (logRes.data as any).results || [];
-              const lMatch = lList.find((l: any) => String(l.emp_code).toLowerCase() === empCode.toLowerCase()) || lList[0];
+              const cleanEmp = empCode.trim().toLowerCase();
+              const lMatch = lList.find((l: any) => String(l.emp_code || '').trim().toLowerCase() === cleanEmp);
               if (lMatch?.emp_name && lMatch.emp_name.trim()) {
                 const resolvedLogName = lMatch.emp_name.trim();
                 newProf = {
@@ -554,8 +563,12 @@ export const ProfileScreen: React.FC = () => {
         if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
           const list = (salRes.value.data as any).results || salRes.value.data;
           if (Array.isArray(list) && list.length > 0) {
-            newSal = list[0];
-            setSalaryInfo(newSal);
+            const cleanEmp = empCode.trim().toLowerCase();
+            const salMatch = list.find((s: any) => !s.emp_code || String(s.emp_code).trim().toLowerCase() === cleanEmp);
+            if (salMatch) {
+              newSal = salMatch;
+              setSalaryInfo(newSal);
+            }
           }
         }
 
@@ -654,6 +667,14 @@ export const ProfileScreen: React.FC = () => {
   };
 
   useEffect(() => {
+    if (cachedProfileData && cachedProfileData.empCode !== empCode) {
+      cachedProfileData = null;
+      setSalaryInfo(null);
+      setProfileData(null);
+      setProfileScope((currentUser as any)?.scope || null);
+      setAvatarSource(currentUser?.avatarUrl ? { uri: currentUser.avatarUrl } : null);
+      setAvatarError(false);
+    }
     loadProfileData();
   }, [empCode]);
 

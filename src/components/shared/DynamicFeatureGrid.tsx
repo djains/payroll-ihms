@@ -15,6 +15,7 @@ export const DynamicFeatureGrid: React.FC = () => {
 
   const handleFeaturePress = (feature: FeatureDefinition) => {
     const screenName = feature.screenName.replace('Screen', '') as ScreenName;
+    console.log(`[FEATURE CARD CLICK] 🔘 Tapped: "${feature.name}" (${feature.id}) -> Screen: ${screenName} | API: ${(feature as any).apiEndpoint || 'N/A'}`);
     navigate(screenName);
   };
 

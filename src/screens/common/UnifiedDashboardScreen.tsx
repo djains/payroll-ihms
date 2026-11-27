@@ -9,6 +9,7 @@ import {
   RefreshControl,
   Image,
   Linking,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './UnifiedDashboardScreen.styles';
@@ -22,6 +23,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useTenantStore } from '../../store/tenantStore';
 import { useSuperAdminStore } from '../../store/superAdminStore';
 import { useNotificationStore } from '../../store/notificationStore';
+import { useShiftTrackingStore } from '../../store/shiftTrackingStore';
 import { useNavigation, useNavigationState } from '../../navigation/navigationContext';
 import { ScreenName } from '../../navigation/types';
 import { staffApi, authApi, apiClient, API_ENDPOINTS, ANDROID_API_KEY, BreakPunchItem } from '../../api';
@@ -29,7 +31,7 @@ import { checkForInAppUpdate } from '../../services/inAppUpdate.service';
 import { companyAttendanceReviewCache } from '../features/superadmin/CompanyAttendanceReviewScreen';
 import { companyWorkImagesReviewCache } from '../features/superadmin/CompanyWorkImagesReviewScreen';
 import { documentVerifyCache } from '../features/superadmin/DocumentVerifyScreen';
-import { colors } from '../../theme';
+import { colors, spacing } from '../../theme';
 import { ms } from '../../theme/responsive';
 
 // Central In-Memory Cache with TTL for fast, zero-flicker transitions & lazy loading
@@ -115,41 +117,21 @@ function parseDojDate(rawStr?: string | null): Date | null {
   return isNaN(parsed.getTime()) ? null : new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
 }
 
-/**
- * Performance Profiler: Logs exact API endpoint name and duration in ms to console
- */
-async function timedApi<T>(name: string, fn: () => Promise<T>): Promise<T> {
-  const t0 = Date.now();
-  try {
-    const res: any = await fn();
-    const cost = Date.now() - t0;
-    let detail = '';
-    if (res?.success && res?.data) {
-      const list = Array.isArray(res.data) ? res.data : res.data?.results;
-      if (Array.isArray(list)) {
-        const countStr = typeof res.data?.count === 'number' ? ` (Total: ${res.data.count})` : '';
-        detail = ` | Fetched ${list.length} records${countStr}`;
-      } else if (typeof res.data === 'object') {
-        detail = ' | OK';
-      }
-    } else if (res && !res.success) {
-      detail = ` | Failed: ${res.error || 'Unknown error'}`;
-    }
-    console.log(`[Dashboard API] ⏱️ ${name} -> ${cost}ms${detail}`);
-    return res;
-  } catch (err) {
-    const cost = Date.now() - t0;
-    console.warn(`[Dashboard API] ❌ ${name} failed after ${cost}ms:`, err);
-    throw err;
-  }
+async function timedApi<T>(_name: string, fn: () => Promise<T>): Promise<T> {
+  return await fn();
 }
 
 export const UnifiedDashboardScreen: React.FC = () => {
   const { currentUser, logout, hasMenuAccess } = useAuthStore();
   const { currentCompany } = useTenantStore();
+  const workMode = useShiftTrackingStore((s) => s.workMode);
   const { navigate } = useNavigation();
   const { currentRoute } = useNavigationState();
   const insets = useSafeAreaInsets();
+  const { width: winWidth } = useWindowDimensions();
+  const gridColCount = winWidth >= 600 ? 4 : 3;
+  const gridGap = ms(10);
+  const dynamicCardWidth = Math.floor((winWidth - spacing.md * 2 - gridGap * (gridColCount - 1) - 2) / gridColCount);
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 24 : 16);
 
   const empCode = currentUser?.empCode || currentUser?.username || '';
@@ -423,13 +405,10 @@ export const UnifiedDashboardScreen: React.FC = () => {
         if (typeof cached.adminTodayPunchedCount === 'number') setAdminTodayPunchedCount(cached.adminTodayPunchedCount);
         if (typeof cached.adminTodayWorkPhotosCount === 'number') setAdminTodayWorkPhotosCount(cached.adminTodayWorkPhotosCount);
 
-        // Instant Cache Hit: Return without network calls (unless forced pull-to-refresh)
-        if (!isForce) {
-          setLoading(false);
-          setRefreshing(false);
-          console.log(`[Dashboard] ⚡ Instant Cache Hit: 0 APIs called (0ms) | Punched Today: ${cached.adminTodayPunchedCount ?? 0} | Work Photos Today: ${cached.adminTodayWorkPhotosCount ?? 0} | Workers: ${cached.adminWorkersCount ?? 0} | Units: ${cached.adminUnitsCount ?? 0}`);
-          return;
-        }
+        // Instant Cache Hit: Populate states immediately (0ms) so user sees no loading screen
+        setLoading(false);
+        setRefreshing(false);
+        // Continue silently in background to revalidate live punches & today's shift time without showing full-screen spinner
       }
 
       const rawUnit = currentUser?.branchOrUnit || (currentUser as any)?.scope?.unit_name || '';
@@ -619,7 +598,6 @@ export const UnifiedDashboardScreen: React.FC = () => {
         companyWorkImagesReviewCache.records = mergedWorkList;
         companyWorkImagesReviewCache.timestamp = Date.now();
         setAdminTodayWorkPhotosCount(todayWorkPhotos);
-        console.log(`[Dashboard API] 📸 Work Proof Fetch: Portal=${portalCount} | HR API=${hrCount} | Merged Total Today=${todayWorkPhotos}`);
 
         // Save into dashboard memory cache with full telemetry
         dashboardMemoryCache[empCode] = {
@@ -642,28 +620,27 @@ export const UnifiedDashboardScreen: React.FC = () => {
         };
 
         const durationMs = Date.now() - fetchStartTime;
-        console.log(`[Dashboard] Company Admin Sync: 5 APIs in ~${durationMs}ms | Cached -> Punched Today: ${todayPunched} | Work Photos Today: ${todayWorkPhotos} | Workers: ${eTotal} | Units: ${uTotal}`);
         setLoading(false);
         setRefreshing(false);
         return;
       }
 
-      // If company name is STILL not resolved and we have a company code, fetch company master from backend
+      // If company name is STILL not resolved and we have a company code, fetch company details from backend
       if (!resolvedScopeCompName && !liveCompany?.name && targetCompCode) {
         try {
-          const compUrl = `${API_ENDPOINTS.COMPANIES}?search=${encodeURIComponent(targetCompCode)}`;
-          const compRes = await timedApi('Company Master (GET /api/masters/companies/)', () => apiClient.get<any>(compUrl));
-          if (compRes.success && compRes.data) {
-            const list = Array.isArray(compRes.data.results) ? compRes.data.results : Array.isArray(compRes.data) ? compRes.data : [];
-            const compObj = parseCompanyFromList(list);
-            if (compObj) {
-              setLiveCompany((prev) => ({
-                ...prev,
-                ...compObj,
-              }));
-            }
+          // Use authenticated /api/masters/company-logo/ (accessible to all active users without 403)
+          const logoRes = await timedApi('Company Logo (GET /api/masters/company-logo/)', () =>
+            apiClient.get<any>('/api/masters/company-logo/')
+          );
+          if (logoRes.success && logoRes.data?.company_name) {
+            setLiveCompany((prev) => ({
+              location: prev?.location || '',
+              city: prev?.city || '',
+              ...prev,
+              name: logoRes.data.company_name,
+              code: logoRes.data.comp_code || targetCompCode,
+            }));
           } else if (currentCompany?.name) {
-            // Permission restricted for workers (403): fallback gracefully to selected company in store
             setLiveCompany((prev) => ({
               location: prev?.location || '',
               city: prev?.city || '',
@@ -690,11 +667,15 @@ export const UnifiedDashboardScreen: React.FC = () => {
         (hasMenuAccess('Branchwise image upload') || hasMenuAccess('Working Images Upload'))
       );
 
-      // Lazy load petty cash, guard deployment and work proof for staff/supervisors
-      const results = await Promise.allSettled([
+      // Progressive 2-Stage Loading:
+      // Stage 1: Critical Attendance, Punches & Approved Leaves (unblocks main UI in ~250ms)
+      // Stage 2: Secondary Cards (Salary Slips, KYC Documents, Petty Cash, Guards, Work Proof)
+      const stage1Promise = Promise.allSettled([
         timedApi('Punch Logs (GET /api/attendance/android-logs/)', () => staffApi.getLivePunchLogs(empCode)),
-        timedApi('Salary Slips (GET /api/payroll/mobile-salary-slip/months/)', () => staffApi.getMobileSalarySlipMonths()),
         timedApi('Leave Applications (GET /api/leaves/applications/)', () => staffApi.getLeaveApplications()),
+      ]);
+      const secondaryPromise = Promise.allSettled([
+        timedApi('Salary Slips (GET /api/payroll/mobile-salary-slip/months/)', () => staffApi.getMobileSalarySlipMonths()),
         timedApi('Documents & KYC (GET /api/hr/android-documents/)', () => staffApi.getDocumentsStatus(empCode)),
         isSupervisor
           ? timedApi('Petty Cash (GET /api/petty-cash/requests/)', () => staffApi.getPettyCashRequests())
@@ -707,25 +688,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
           : Promise.resolve({ success: true, data: [] } as any),
       ]);
 
-      const [attRes, salRes, leaveRes, docRes, pettyRes, guardsRes, workProofRes] = results;
-
-      // Resolve latest Salary Slip month strictly from SQL via official mobile salary slip API
-      let resolvedLabel = '';
-      const MONTHS_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
-        const mList = (salRes.value.data as any).results || salRes.value.data;
-        if (Array.isArray(mList) && mList.length > 0) {
-          const sorted = [...mList].sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
-          const mNum = parseInt(sorted[0].month, 10);
-          const yNum = parseInt(sorted[0].year, 10);
-          if (mNum >= 1 && mNum <= 12 && yNum) {
-            resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
-          }
-        }
-      }
-      if (resolvedLabel) {
-        setLatestSalaryMonthLabel(resolvedLabel);
-      }
+      const [attRes, leaveRes] = await stage1Promise;
 
       let newAttCount = attendanceCount;
       let newLatestPunch = latestPunch;
@@ -739,9 +702,12 @@ export const UnifiedDashboardScreen: React.FC = () => {
       // 0. Process Profile User Details from MySQL GetUserDetails only if not yet loaded
       if (!profileName || !currentUser?.joiningDate) {
         try {
-          const uDetailsRes = await apiClient.get<any>(
-            `/api/mobile/GetUserDetails/?userName=${encodeURIComponent(currentUser?.username || empCode)}`,
-            { 'X-API-Key': ANDROID_API_KEY }
+          const uDetailsRes = await timedApi(
+            `User Details (GET /api/mobile/GetUserDetails/?userName=${encodeURIComponent(currentUser?.username || empCode)})`,
+            () => apiClient.get<any>(
+              `/api/mobile/GetUserDetails/?userName=${encodeURIComponent(currentUser?.username || empCode)}`,
+              { 'X-API-Key': ANDROID_API_KEY }
+            )
           );
           if (uDetailsRes.success && uDetailsRes.data) {
             const rawList = uDetailsRes.data;
@@ -788,8 +754,11 @@ export const UnifiedDashboardScreen: React.FC = () => {
             // Fallback: If GetUserDetails didn't return employee name, fetch from attendance logs
             if (!profileName) {
               try {
-                const logRes = await apiClient.get<any>(
-                  `/api/attendance/android-logs/?emp_code=${encodeURIComponent(currentUser?.username || empCode)}`
+                const logRes = await timedApi(
+                  `Profile Name Fallback (GET /api/attendance/android-logs/?emp_code=${encodeURIComponent(currentUser?.username || empCode)})`,
+                  () => apiClient.get<any>(
+                    `/api/attendance/android-logs/?emp_code=${encodeURIComponent(currentUser?.username || empCode)}`
+                  )
                 );
                 if (logRes.success && logRes.data) {
                   const lList = Array.isArray(logRes.data) ? logRes.data : (logRes.data as any).results || [];
@@ -908,7 +877,10 @@ export const UnifiedDashboardScreen: React.FC = () => {
             shortThreshold = cachedPolicyThresholds[empCode].short;
           } else {
             try {
-              const pRes = await staffApi.getPolicyThresholds(empCode);
+              const pRes = await timedApi(
+                `Policy Thresholds (GET /api/attendance/android-logs/policy-thresholds/?emp_code=${empCode})`,
+                () => staffApi.getPolicyThresholds(empCode)
+              );
               if (pRes.success && pRes.data) {
                 const pData = pRes.data as any;
                 workingThreshold = Number(pData.working_hours) || 8.0;
@@ -1076,11 +1048,45 @@ export const UnifiedDashboardScreen: React.FC = () => {
           const currentPunch = evaluateCurrentShiftPunch(logs, now);
           newLatestPunch = currentPunch;
           setLatestPunch(currentPunch);
+
+          // Log today's punch status concisely
+          if (currentPunch) {
+            const inT = currentPunch.camera_intime || currentPunch.in_time || '--:--';
+            const outT = currentPunch.camera_outtime || currentPunch.out_time || '--:--';
+            console.log(`[TODAY PUNCH] IN: ${inT} | OUT: ${outT}`);
+          } else {
+            console.log('[TODAY PUNCH] Not marked yet (Shift IN)');
+          }
         }
       }
 
       // 1b. Process Live Break Status from /api/attendance/break-punch/
       await fetchLiveBreakStatus();
+
+      // Stage 1 Complete: Dismiss loading spinner immediately!
+      // Live Shift status, duty timer, and attendance counts are now interactive in ~250ms!
+      setLoading(false);
+
+      // Stage 2 (Secondary Cards): Await background data
+      const [salRes, docRes, pettyRes, guardsRes, workProofRes] = await secondaryPromise;
+
+      // Resolve latest Salary Slip month strictly from SQL via official mobile salary slip API
+      let resolvedLabel = '';
+      const MONTHS_SHORT = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
+        const mList = (salRes.value.data as any).results || salRes.value.data;
+        if (Array.isArray(mList) && mList.length > 0) {
+          const sorted = [...mList].sort((a: any, b: any) => (Number(b.year) * 100 + Number(b.month)) - (Number(a.year) * 100 + Number(a.month)));
+          const mNum = parseInt(sorted[0].month, 10);
+          const yNum = parseInt(sorted[0].year, 10);
+          if (mNum >= 1 && mNum <= 12 && yNum) {
+            resolvedLabel = `${MONTHS_SHORT[mNum]} ${yNum}`;
+          }
+        }
+      }
+      if (resolvedLabel) {
+        setLatestSalaryMonthLabel(resolvedLabel);
+      }
 
       // 2. Process Salary
       if (salRes.status === 'fulfilled' && salRes.value.success && salRes.value.data) {
@@ -1092,8 +1098,9 @@ export const UnifiedDashboardScreen: React.FC = () => {
       }
 
       // 3. Process Live Leave Balances from MySQL
+      let balRes: any = null;
       try {
-        const balRes = await timedApi('Leave Balances (GET /api/leaves/balances/)', () =>
+        balRes = await timedApi('Leave Balances (GET /api/leaves/balances/)', () =>
           staffApi.getLeaveBalances()
         );
         if (balRes.success && balRes.data) {
@@ -1174,7 +1181,6 @@ export const UnifiedDashboardScreen: React.FC = () => {
       // Update in-memory cache with measured performance
       const durationMs = Date.now() - fetchStartTime;
       const apiCallCount = isSupervisor ? 7 : 5;
-      console.log(`[Dashboard] Sync: ${apiCallCount} APIs in ~${durationMs}ms | Work Proofs Today: ${staffWorkProofToday}`);
 
       dashboardMemoryCache[empCode] = {
         timestamp: Date.now(),
@@ -1260,7 +1266,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
         statusBg: '#F1F5F9',
         statusBorder: '#E2E8F0',
         statusIcon: 'clock',
-        distanceText: 'Shift Attendance',
+        distanceText: workMode === 'WFH' ? 'WFH' : workMode === 'OFFSITE' ? 'Offsite' : 'On-Site',
       };
     }
 
@@ -1391,7 +1397,14 @@ export const UnifiedDashboardScreen: React.FC = () => {
       statusBg,
       statusBorder,
       statusIcon,
-      distanceText: punch.unit_name || punch.address || 'Assigned Site',
+      distanceText: (() => {
+        const addr = String(punch?.address || punch?.ADDRESS || '').toUpperCase();
+        if (addr.startsWith('[WFH]')) return 'WFH';
+        if (addr.startsWith('[OFFSITE]')) return 'Offsite';
+        if (workMode === 'WFH') return 'WFH';
+        if (workMode === 'OFFSITE') return 'Offsite';
+        return 'On-Site';
+      })(),
     };
   };
 
@@ -2385,8 +2398,6 @@ export const UnifiedDashboardScreen: React.FC = () => {
                     <Text
                       style={styles.punchCardTitle}
                       numberOfLines={1}
-                      adjustsFontSizeToFit
-                      minimumFontScale={0.85}
                     >
                       Shift Attendance
                     </Text>
@@ -2394,8 +2405,6 @@ export const UnifiedDashboardScreen: React.FC = () => {
                   <Text
                     style={styles.punchCardSubtitle}
                     numberOfLines={1}
-                    adjustsFontSizeToFit
-                    minimumFontScale={0.85}
                   >
                     {punchInfo.distanceText}
                   </Text>
@@ -2864,10 +2873,11 @@ export const UnifiedDashboardScreen: React.FC = () => {
             return (
               <TouchableOpacity
                 key={card.id}
-                style={styles.featureCard}
+                style={[styles.featureCard, { width: dynamicCardWidth, minHeight: dynamicCardWidth + ms(10) }]}
                 activeOpacity={0.75}
                 onPress={() => {
-                  console.log(`[Dashboard] 🔘 Feature Card Clicked: "${card.title}" (${card.id}) -> Navigating to: ${card.targetScreen}`);
+                  console.log(`[FEATURE CARD CLICK] 👆 Tapped: "${card.title}" (${card.id})`);
+                  console.log(`[FEATURE CARD INFO] ℹ️ Subtitle: "${subtitle}" | Screen: ${card.targetScreen} | Menus: ${JSON.stringify(card.requiredMenus || [])}`);
                   navigate(card.targetScreen);
                 }}
               >

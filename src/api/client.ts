@@ -134,6 +134,8 @@ class ApiClient {
     const headers = { ...defaultHeaders, ...(options.headers as Record<string, string>) };
 
     const url = apiConfig.getEndpoint(path);
+    const method = (options.method || 'GET').toUpperCase();
+    console.log(`[API CALL] ${method} ${path}`);
 
     try {
       const response = await fetch(url, {
@@ -160,6 +162,8 @@ class ApiClient {
       } else {
         data = await response.text();
       }
+
+      console.log(`[API RESPONSE] ${method} ${path} (${response.status}):`, data);
 
       if (!response.ok) {
         // ONLY auto-logout on 401 Unauthorized (authentic session expired / unauthenticated).
@@ -245,7 +249,7 @@ class ApiClient {
       };
     } catch (err: any) {
       const errorMsg = err?.message || 'Network connection error. Is backend running?';
-      console.warn(`[ApiClient] Request to ${url} failed:`, errorMsg);
+      console.log(`[API ERROR] ${method} ${path}:`, errorMsg);
       return {
         success: false,
         error: errorMsg,

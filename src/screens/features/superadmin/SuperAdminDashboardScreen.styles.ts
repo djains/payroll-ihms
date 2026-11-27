@@ -3,7 +3,7 @@ import { spacing, borderRadius, shadows, fontSizes, ms } from '../../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_GAP = ms(10);
-const CARD_WIDTH = (SCREEN_WIDTH - spacing.md * 2 - GRID_GAP * 2) / 3;
+const CARD_WIDTH = Math.floor((SCREEN_WIDTH - spacing.md * 2 - GRID_GAP * 2 - 2) / 3);
 
 export const styles = StyleSheet.create({
   container: {

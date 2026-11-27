@@ -7,6 +7,7 @@ import {
   Platform,
   RefreshControl,
   ActivityIndicator,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './SuperAdminDashboardScreen.styles';
@@ -18,7 +19,7 @@ import {
 import { useAuthStore } from '../../../store/authStore';
 import { useNavigation } from '../../../navigation/navigationContext';
 import { superadminApi } from '../../../api';
-import { colors } from '../../../theme';
+import { colors, spacing, ms } from '../../../theme';
 
 // Module-level in-memory cache for instant zero-flicker reload
 let cachedAdminCounts: {
@@ -42,6 +43,10 @@ export const SuperAdminDashboardScreen: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(!hasMatchingCache);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState<boolean>(false);
+  const { width: winWidth } = useWindowDimensions();
+  const gridColCount = winWidth >= 600 ? 4 : 3;
+  const gridGap = ms(10);
+  const dynamicCardWidth = Math.floor((winWidth - spacing.md * 2 - gridGap * (gridColCount - 1) - 2) / gridColCount);
 
   // Live KPI counts from real MySQL backend
   const [companiesCount, setCompaniesCount] = useState<number>(hasMatchingCache ? cachedAdminCounts!.companiesCount : 0);
@@ -255,9 +260,12 @@ export const SuperAdminDashboardScreen: React.FC = () => {
           {ADMIN_FEATURES.map((item) => (
             <TouchableOpacity
               key={item.id}
-              style={styles.featureCard}
+              style={[styles.featureCard, { width: dynamicCardWidth, minHeight: dynamicCardWidth + ms(10) }]}
               activeOpacity={0.75}
-              onPress={() => navigate(item.screen as any)}
+              onPress={() => {
+                console.log(`[ADMIN FEATURE CARD CLICK] 🔘 Tapped: "${item.title}" (${item.id}) -> Target: ${item.screen} | Value: "${item.subtitle}"`);
+                navigate(item.screen as any);
+              }}
             >
               <View style={[styles.cardIconWrap, { backgroundColor: item.bgColor }]}>
                 <AppIcon name={item.icon as any} size={20} color={item.iconColor} />

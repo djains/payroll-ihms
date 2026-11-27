@@ -18,7 +18,7 @@ import { styles } from './GeofencePunchScreen.styles';
 import { AppScreenContainer, AppHeader, AppIcon, CustomAlertModal, CustomAlertButton } from '../../../components/common';
 import { useNavigation } from '../../../navigation/navigationContext';
 import { useAuthStore } from '../../../store/authStore';
-import { useShiftTrackingStore } from '../../../store/shiftTrackingStore';
+import { useShiftTrackingStore, WorkMode } from '../../../store/shiftTrackingStore';
 import { showToast } from '../../../store/toastStore';
 import { staffApi } from '../../../api/staff.api';
 import { apiClient } from '../../../api/client';
@@ -59,7 +59,7 @@ export const GeofencePunchScreen: React.FC = () => {
   const [unitLon, setUnitLon] = useState<number>(
     (currentUser as any)?.assignedUnitLongitude ? Number((currentUser as any).assignedUnitLongitude) : 0
   );
-  const [geofenceRadius, setGeofenceRadius] = useState<number>(20);
+  const [geofenceRadius, setGeofenceRadius] = useState<number>(DEFAULT_GEOFENCE_RADIUS);
   const [unitName, setUnitName] = useState<string>(currentUser?.branchOrUnit || '');
   const [unitCode, setUnitCode] = useState<string>((currentUser as any)?.scope?.unit_code || '');
   const [clientCode, setClientCode] = useState<string>((currentUser as any)?.scope?.client_code || '');
@@ -71,6 +71,13 @@ export const GeofencePunchScreen: React.FC = () => {
   const [inTime, setInTime] = useState<string>('');
   const [workingHours, setWorkingHours] = useState<string>('');
   const [shiftType, setShiftType] = useState<string>('');
+  const storeWorkMode = useShiftTrackingStore((s) => s.workMode);
+  const [selectedMode, setSelectedMode] = useState<WorkMode>(storeWorkMode || 'ONSITE');
+  const [resolvedCurrentAddress, setResolvedCurrentAddress] = useState<string>('');
+
+  useEffect(() => {
+    setSelectedMode(storeWorkMode || 'ONSITE');
+  }, [storeWorkMode]);
 
   // Accordion dropdown state for Site & Shift details
   const [isSiteDetailsExpanded, setIsSiteDetailsExpanded] = useState<boolean>(false);
@@ -81,6 +88,39 @@ export const GeofencePunchScreen: React.FC = () => {
       try {
         const empCode = currentUser?.empCode || currentUser?.username || '';
         const userUnitCode = (currentUser as any)?.scope?.unit_code || currentUser?.branchOrUnit || '';
+
+        // 0. Fetch live Master Unit coordinates & Geofence Distance directly from Mobile API (Accessible by staff)
+        if (empCode) {
+          try {
+            const mCoordsRes = await staffApi.getUnitCoords(empCode);
+            if (mCoordsRes.success && mCoordsRes.data) {
+              const rawData = mCoordsRes.data;
+              const coordsList = Array.isArray(rawData) ? rawData : (rawData as any).results || [rawData];
+              const cObj = coordsList[0];
+              if (cObj) {
+                const latVal = parseFloat(cObj.UNIT_LATTITUDE || cObj.unit_latitude || cObj.LATTITUDE || cObj.latitude || '0');
+                const lonVal = parseFloat(cObj.UNIT_LONGTITUDE || cObj.unit_longitude || cObj.LONGTITUDE || cObj.longitude || '0');
+                const distVal = parseFloat(cObj.DISTANCE || cObj.distance || cObj.AREA_METERS || cObj.area_meters || '0');
+                const uName = cObj.UNIT_NAME || cObj.unit_name;
+                const uCode = cObj.UNIT_CODE || cObj.unit_code;
+                const uAddr = cObj.UNIT_ADDRESS || cObj.unit_address || cObj.ADDRESS || cObj.address;
+
+                if (!isNaN(latVal) && !isNaN(lonVal) && latVal !== 0 && lonVal !== 0) {
+                  setUnitLat(latVal);
+                  setUnitLon(lonVal);
+                }
+                if (!isNaN(distVal) && distVal > 0) {
+                  setGeofenceRadius(distVal);
+                }
+                if (uName) setUnitName(uName);
+                if (uCode) setUnitCode(uCode);
+                if (uAddr) setLocationArea(uAddr);
+              }
+            }
+          } catch (mErr) {
+            console.warn('[Punch] Mobile unit coords error:', mErr);
+          }
+        }
 
         // 1. Fetch live Master Unit directly from SQL master_unit
         let resolvedUnitObj: any = null;
@@ -153,8 +193,14 @@ export const GeofencePunchScreen: React.FC = () => {
             const today = new Date();
             const curMonth = today.getMonth() + 1;
             const curYear = today.getFullYear();
+            const shiftUrl = `/api/mobile/GetEmployeeShift/?emp_code=${empCode}&month=${curMonth}&year=${curYear}`;
+            console.log(`[API CALL] 🌐 GET ${shiftUrl}`);
             const shiftRes = await staffApi.getEmployeeShift(empCode, curMonth, curYear);
-            console.log('[PunchShift] GetEmployeeShift res:', { success: shiftRes.success, error: shiftRes.error });
+            console.log(`[API RESPONSE] 📥 GET ${shiftUrl}:`, {
+              success: shiftRes.success,
+              today: shiftRes.data?.today,
+              shiftsCount: shiftRes.data?.shifts?.length ?? 0,
+            });
             if (shiftRes.success && shiftRes.data) {
               const data = shiftRes.data;
               const shiftList: any[] = data.shifts || [];
@@ -233,13 +279,18 @@ export const GeofencePunchScreen: React.FC = () => {
         // 1.2 Fetch Employee Master shift details (e.g. shift_type / in_time from pay_employee_master)
         if (empCode) {
           try {
-            const uDetRes = await apiClient.get<any>(
-              `/api/mobile/GetUserDetails/?userName=${encodeURIComponent(empCode)}`,
-              { 'X-API-Key': ANDROID_API_KEY }
-            );
+            const userDetailsUrl = `/api/mobile/GetUserDetails/?userName=${encodeURIComponent(empCode)}`;
+            console.log(`[API CALL] 🌐 GET ${userDetailsUrl}`);
+            const uDetRes = await apiClient.get<any>(userDetailsUrl, { 'X-API-Key': ANDROID_API_KEY });
             if (uDetRes.success && uDetRes.data) {
               const uList = Array.isArray(uDetRes.data) ? uDetRes.data : [uDetRes.data];
               const uDet = uList[0];
+              console.log(`[API RESPONSE] 📥 GET ${userDetailsUrl}:`, {
+                SHIFT_TIME: uDet?.SHIFT_TIME,
+                REPORTING_TO: uDet?.REPORTING_TO,
+                DEPT_CODE: uDet?.DEPT_CODE,
+                UNIT_NAME: uDet?.UNIT_NAME,
+              });
               if (uDet?.SHIFT_TIME && String(uDet.SHIFT_TIME).trim()) {
                 const st = String(uDet.SHIFT_TIME).trim();
                 if (st.toLowerCase() !== 'flexible') {
@@ -253,11 +304,19 @@ export const GeofencePunchScreen: React.FC = () => {
           } catch {}
 
           try {
-            const empRes = await apiClient.get<any>(`/api/hr/employees/?search=${encodeURIComponent(empCode)}`);
+            const empUrl = `/api/hr/employees/?search=${encodeURIComponent(empCode)}`;
+            console.log(`[API CALL] 🌐 GET ${empUrl}`);
+            const empRes = await apiClient.get<any>(empUrl);
             if (empRes.success && empRes.data) {
               const empList = Array.isArray(empRes.data) ? empRes.data : empRes.data.results || [];
               const empRec = empList.find((e: any) => String(e.emp_code).toLowerCase() === empCode.toLowerCase()) || empList[0];
               if (empRec) {
+                console.log(`[API RESPONSE] 📥 GET ${empUrl}:`, {
+                  shift_type: empRec.shift_type,
+                  in_time: empRec.in_time,
+                  working_hours: empRec.working_hours,
+                  department: empRec.department || empRec.dept_name || empRec.dept_code,
+                });
                 if (empRec.shift_type && empRec.shift_type.trim()) {
                   const st = empRec.shift_type.trim();
                   if (st.toLowerCase() !== 'flexible') {
@@ -358,6 +417,8 @@ export const GeofencePunchScreen: React.FC = () => {
         // 3. Department & Designation from user session / profile
         const userDesig = currentUser?.designation || (currentUser as any)?.role || 'OPERATIONS';
         setDeptCode(userDesig);
+
+        console.log(`[PUNCH CONFIG] Shift: ${shiftType || 'General'} (${inTime || 'Flexible'}) | Dept: ${userDesig || 'OPERATIONS'} | Unit: ${resolvedUnitObj?.unit_name || userUnitCode}`);
       } catch (err) {
         console.warn('[Punch] Error syncing live SQL unit details:', err);
       }
@@ -454,15 +515,81 @@ export const GeofencePunchScreen: React.FC = () => {
           const todayDash = `${curY}-${String(curM + 1).padStart(2, '0')}-${String(curD).padStart(2, '0')}`;
           const todaySlash = `${String(curD).padStart(2, '0')}/${String(curM + 1).padStart(2, '0')}/${curY}`;
 
+          // Canonical helper to check all possible backend date column keys
+          const getLogDateStr = (log: any) =>
+            String(
+              log.date_time ||
+              log.Date_Time ||
+              log.camera_intime ||
+              log.Camera_intime ||
+              log.attendances_intime ||
+              log.Attendances_intime ||
+              log.punch_date ||
+              log.in_time ||
+              log.date ||
+              ''
+            ).trim();
+
           // Find punch logged on TODAY
           const todayPunch = logsList.find((log: any) => {
-            const raw = String(log.date_time || log.Date_Time || log.attendances_intime || log.camera_intime || '').trim();
+            const raw = getLogDateStr(log);
             return raw.startsWith(todayDash) || raw.includes(todaySlash);
           });
 
-          if (todayPunch) {
-            const rawIn = todayPunch.camera_intime || todayPunch.Camera_intime || todayPunch.attendances_intime;
-            const rawOut = todayPunch.camera_outtime || todayPunch.Camera_outtime || todayPunch.attendances_outtime;
+          // Night Shift Support: Check for active night shift from yesterday (within last 18 hours)
+          let punchToUse = todayPunch;
+          if (!todayPunch) {
+            const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            const yestY = yesterday.getFullYear();
+            const yestM = yesterday.getMonth();
+            const yestD = yesterday.getDate();
+            const yestDash = `${yestY}-${String(yestM + 1).padStart(2, '0')}-${String(yestD).padStart(2, '0')}`;
+            const yestSlash = `${String(yestD).padStart(2, '0')}/${String(yestM + 1).padStart(2, '0')}/${yestY}`;
+
+            const yestPunch = logsList.find((log: any) => {
+              const raw = getLogDateStr(log);
+              return raw.startsWith(yestDash) || raw.includes(yestSlash);
+            });
+
+            if (yestPunch) {
+              const yestIn = yestPunch.camera_intime || yestPunch.Camera_intime || yestPunch.attendances_intime || yestPunch.in_time;
+              const yestOut = yestPunch.camera_outtime || yestPunch.Camera_outtime || yestPunch.attendances_outtime || yestPunch.out_time;
+
+              if (yestIn && (!yestOut || yestOut === '--:--')) {
+                // Ongoing Night Shift: User punched IN yesterday evening/night and has not punched OUT yet
+                try {
+                  const inD = new Date(String(yestIn).replace(' ', 'T'));
+                  const diffHours = (now.getTime() - inD.getTime()) / (1000 * 60 * 60);
+                  if (diffHours >= 0 && diffHours < 18) {
+                    punchToUse = yestPunch;
+                  }
+                } catch {
+                  punchToUse = yestPunch;
+                }
+              } else if (yestIn && yestOut && yestOut !== '--:--') {
+                // Night shift already ended this morning: Enforce 4-hour cooldown before opening next shift punch IN
+                try {
+                  const outD = new Date(String(yestOut).replace(' ', 'T'));
+                  const diffSinceOut = (now.getTime() - outD.getTime()) / (1000 * 60 * 60);
+                  if (diffSinceOut >= 0 && diffSinceOut < 4) {
+                    punchToUse = yestPunch;
+                  }
+                } catch {}
+              }
+            }
+          }
+
+          if (punchToUse) {
+            const rawIn =
+              punchToUse.camera_intime ||
+              punchToUse.Camera_intime ||
+              punchToUse.attendances_intime ||
+              punchToUse.in_time;
+            const rawOut =
+              punchToUse.camera_outtime ||
+              punchToUse.Camera_outtime ||
+              punchToUse.attendances_outtime ||
+              punchToUse.out_time;
 
             const formatT12 = (val: string) => {
               if (!val) return '';
@@ -489,20 +616,29 @@ export const GeofencePunchScreen: React.FC = () => {
               return s.length >= 5 ? s.substring(11, 16) : '';
             };
 
+            const inFormatted = formatT12(rawIn);
+            const outFormatted = formatT12(rawOut);
+
+            console.log(`[PUNCH STATUS] 🔗 Source: GET /api/attendance/android-logs/?emp_code=${empCode}`);
+            console.log(`[PUNCH STATUS] ✅ Today Punch: IN=${inFormatted || '--:--'} | OUT=${outFormatted || '--:--'} | Duty: ${rawOut ? 'COMPLETED' : 'ACTIVE'}`);
+
             setShiftPunchState({
               hasPunchedIn: Boolean(rawIn),
               hasPunchedOut: Boolean(rawOut),
-              inTimeStr: formatT12(rawIn),
-              outTimeStr: formatT12(rawOut),
+              inTimeStr: inFormatted,
+              outTimeStr: outFormatted,
               loading: false,
             });
             return;
+          } else {
+            console.log(`[PUNCH STATUS] 🔗 Source: GET /api/attendance/android-logs/?emp_code=${empCode}`);
+            console.log(`[PUNCH STATUS] ⚠️ Today Punch: Not marked yet (Ready to punch IN)`);
           }
         }
       }
       setShiftPunchState((prev) => ({ ...prev, loading: false }));
     } catch (e) {
-      console.warn('[PUNCH] Could not fetch today punch status:', e);
+      console.warn('[PUNCH STATUS] ❌ Error:', e);
       setShiftPunchState((prev) => ({ ...prev, loading: false }));
     }
   };
@@ -525,7 +661,25 @@ export const GeofencePunchScreen: React.FC = () => {
       ];
       const result = await PermissionsAndroid.requestMultiple(perms);
       const fineGranted = result[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED;
+      const coarseGranted = result[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] === PermissionsAndroid.RESULTS.GRANTED;
       const camGranted = result[PermissionsAndroid.PERMISSIONS.CAMERA] === PermissionsAndroid.RESULTS.GRANTED;
+
+      if (!fineGranted && !coarseGranted) {
+        setGpsLoading(false);
+        setGpsError('GPS permission not given. Please allow Location permission.');
+        showToast({
+          type: 'error',
+          title: 'GPS Permission Not Given',
+          message: 'Location permission is off. Please allow GPS permission.',
+          duration: 3500,
+        });
+      } else {
+        // Trigger a fresh, accurate GPS fetch once permissions are confirmed
+        setTimeout(() => {
+          refreshGpsLocation();
+        }, 400);
+      }
+
       return fineGranted && camGranted;
     } catch {
       return false;
@@ -555,8 +709,18 @@ export const GeofencePunchScreen: React.FC = () => {
         setGpsError(null);
         console.log('[GPS Device] Real coordinates received:', lat, lon, '| Dist:', dist, 'm | Acc:', acc, 'm');
       } else if (data.type === 'GPS_ERROR') {
+        const isDenied = data.code === 1;
+        const msg = isDenied
+          ? 'GPS permission not given. Please allow Location permission.'
+          : 'GPS is off or unavailable. Please turn ON device Location.';
         setGpsLoading(false);
-        setGpsError(data.message || 'GPS location unavailable. Ensure device location is enabled.');
+        setGpsError(msg);
+        showToast({
+          type: 'error',
+          title: isDenied ? 'GPS Permission Denied' : 'GPS is Off',
+          message: msg,
+          duration: 3500,
+        });
       } else if (data.type === 'OPEN_MAP') {
         setIsMapModalVisible(true);
       }
@@ -579,11 +743,12 @@ export const GeofencePunchScreen: React.FC = () => {
     if (Platform.OS === 'android') {
       const camGranted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA);
       if (camGranted !== PermissionsAndroid.RESULTS.GRANTED) {
-        showAlert(
-          'Camera Permission Required',
-          'Please grant Camera permission in Settings to take your face verification selfie.',
-          'warning'
-        );
+        showToast({
+          type: 'error',
+          title: 'Camera Permission Not Given',
+          message: 'Camera permission is off. Please allow Camera permission to take selfie.',
+          duration: 3500,
+        });
         return;
       }
     }
@@ -679,9 +844,10 @@ export const GeofencePunchScreen: React.FC = () => {
       return;
     }
 
-    // 2. Geofence check
+    // 2. Geofence check (Bypassed for WFH and Offsite / Field Visit)
     const activeRadius = geofenceRadius || DEFAULT_GEOFENCE_RADIUS;
-    if (distanceMeters > activeRadius) {
+    const isGeofenceBypassed = selectedMode !== 'ONSITE';
+    if (!isGeofenceBypassed && distanceMeters > activeRadius) {
       showAlert(
         'Outside Geofence Perimeter',
         `You are currently ${distanceMeters}m away from ${unitName}.\n\nCompany policy requires you to be within ${activeRadius}m to record attendance.`,
@@ -727,6 +893,37 @@ export const GeofencePunchScreen: React.FC = () => {
     const empCode = currentUser?.empCode || currentUser?.username || 'UNKNOWN';
 
     try {
+      let currentAddrText = resolvedCurrentAddress;
+      if (isGeofenceBypassed && !currentAddrText && currentLat && currentLon) {
+        try {
+          const ctrl = new AbortController();
+          const tId = setTimeout(() => ctrl.abort(), 3000);
+          const geoRes = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${currentLat}&lon=${currentLon}&zoom=18&addressdetails=1`,
+            { headers: { 'User-Agent': 'IHMS-Mobile-App/1.0' }, signal: ctrl.signal }
+          );
+          clearTimeout(tId);
+          if (geoRes.ok) {
+            const gJson: any = await geoRes.json();
+            if (gJson?.display_name) {
+              currentAddrText = String(gJson.display_name).trim().slice(0, 180);
+              setResolvedCurrentAddress(currentAddrText);
+            }
+          }
+        } catch {}
+      }
+
+      let finalAddress = unitName;
+      if (selectedMode === 'WFH') {
+        finalAddress = currentAddrText
+          ? `[WFH] ${currentAddrText}`
+          : `[WFH] ${locationCity || 'Work From Home'}`;
+      } else if (selectedMode === 'OFFSITE') {
+        finalAddress = currentAddrText
+          ? `[OFFSITE] ${currentAddrText}`
+          : `[OFFSITE] ${locationCity || 'Field / Client Visit'}`;
+      }
+
       const clickType = type === 'IN' ? 'Attendances_cameraintime' : 'Attendances_cameraouttime';
       const payload: any = {
         emp_code: empCode,
@@ -737,20 +934,14 @@ export const GeofencePunchScreen: React.FC = () => {
         unit_emplatitude: String(currentLat),
         unit_emplongtitude: String(currentLon),
         unit_distance: String(distanceMeters),
-        unit_empaddress: unitName,
+        unit_empaddress: String(finalAddress).slice(0, 250),
         comp_code: currentUser?.companyId || 'C01',
       };
 
-      console.log('[PUNCH] Submitting punch to backend:', {
-        emp_code: empCode,
-        attendances_click: clickType,
-        latitude: currentLat,
-        longitude: currentLon,
-        address: unitName,
-      });
+      console.log(`[PUNCH] 🚀 Submitting ${clickType} (${selectedMode}) punch for ${empCode}`);
 
       const res = await staffApi.recordPunch(payload);
-      console.log('[PUNCH] Backend response:', JSON.stringify(res, null, 2));
+      console.log(`[PUNCH] 📥 Result: Success=${Boolean(res?.success)}`);
 
       if (res.success || (res.data as any)?.status === 'ok') {
         const msg = (res.data as any)?.message || `Shift Punch ${type} recorded successfully!`;
@@ -760,6 +951,7 @@ export const GeofencePunchScreen: React.FC = () => {
             hasPunchedIn: true,
             inTimeStr: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
           }));
+          useShiftTrackingStore.getState().setWorkMode(selectedMode);
           useShiftTrackingStore.getState().setShiftActive(true);
         } else {
           setShiftPunchState((prev) => ({
@@ -800,6 +992,8 @@ export const GeofencePunchScreen: React.FC = () => {
 
     const activeRadius = geofenceRadius || DEFAULT_GEOFENCE_RADIUS;
     const insideGeofence = distanceMeters !== null && distanceMeters <= activeRadius;
+    const isModeBypassed = selectedMode !== 'ONSITE';
+    const canSatisfyLocation = insideGeofence || isModeBypassed;
 
     // ─── Real-Time Leaflet OpenStreetMap HTML Generator ──────────────────
     const buildMapHtml = (isInteractive: boolean) => `
@@ -889,7 +1083,7 @@ export const GeofencePunchScreen: React.FC = () => {
 
     ${currentLat !== null && currentLon !== null ? `updatePosition(${currentLat}, ${currentLon}, ${gpsAccuracy || 5});` : ''}
 
-    // Geolocation fetcher (Triggered on manual refresh and initial load ONLY)
+    // Geolocation fetcher (Triggered once on screen load or manual refresh)
     window.refreshLocation = function() {
       if (!navigator.geolocation) {
         if (window.ReactNativeWebView) {
@@ -897,32 +1091,44 @@ export const GeofencePunchScreen: React.FC = () => {
         }
         return;
       }
-      var geoOpts = { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 };
+      function onSuccess(pos) {
+        var uLat = pos.coords.latitude;
+        var uLon = pos.coords.longitude;
+        var uAcc = pos.coords.accuracy;
+        updatePosition(uLat, uLon, uAcc);
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'LOCATION',
+            latitude: uLat,
+            longitude: uLon,
+            accuracy: uAcc
+          }));
+        }
+      }
+      function onError(err) {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'GPS_ERROR',
+            code: err.code,
+            message: err.message
+          }));
+        }
+      }
       navigator.geolocation.getCurrentPosition(
-        function(pos) {
-          var uLat = pos.coords.latitude;
-          var uLon = pos.coords.longitude;
-          var uAcc = pos.coords.accuracy;
-          updatePosition(uLat, uLon, uAcc);
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'LOCATION',
-              latitude: uLat,
-              longitude: uLon,
-              accuracy: uAcc
-            }));
-          }
-        },
+        onSuccess,
         function(err) {
-          if (window.ReactNativeWebView) {
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'GPS_ERROR',
-              code: err.code,
-              message: err.message
-            }));
+          if (err.code === 3) {
+            // Indoor fallback to Wi-Fi/Cell network location if satellite lock times out
+            navigator.geolocation.getCurrentPosition(
+              onSuccess,
+              onError,
+              { enableHighAccuracy: false, timeout: 8000, maximumAge: 5000 }
+            );
+          } else {
+            onError(err);
           }
         },
-        geoOpts
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     };
 
@@ -980,14 +1186,18 @@ export const GeofencePunchScreen: React.FC = () => {
             <View style={styles.siteIconCircle}>
               <AppIcon name="location" size={18} color="#0D9488" />
             </View>
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={styles.siteNameText} numberOfLines={1}>{unitName}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: ms(6) }}>
+                <Text style={styles.siteNameText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
+                  {unitName}
+                </Text>
                 <View style={styles.unitCodeBadge}>
-                  <Text style={styles.unitCodeText}>{unitCode}</Text>
+                  <Text style={styles.unitCodeText} numberOfLines={1}>
+                    {unitCode}
+                  </Text>
                 </View>
               </View>
-              <Text style={styles.siteAddressSubText} numberOfLines={1}>
+              <Text style={styles.siteAddressSubText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
                 {locationCity || 'Site'} • {displayShiftType} ({displayInTime})
               </Text>
             </View>
@@ -1014,46 +1224,46 @@ export const GeofencePunchScreen: React.FC = () => {
             {/* Row 1: Shift Type + In Time + Working Hours */}
             <View style={styles.siteMetaGrid}>
               <View style={styles.siteMetaChip}>
-                <Text style={styles.siteMetaChipLabel}>SHIFT</Text>
-                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                <Text style={styles.siteMetaChipLabel} numberOfLines={1}>SHIFT</Text>
+                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                   {displayShiftType}
                 </Text>
               </View>
 
               <View style={styles.siteMetaChip}>
-                <Text style={styles.siteMetaChipLabel}>TIMING </Text>
-                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                <Text style={styles.siteMetaChipLabel} numberOfLines={1}>TIMING</Text>
+                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                   {displayInTime}
                 </Text>
               </View>
 
               <View style={styles.siteMetaChip}>
-                <Text style={styles.siteMetaChipLabel}>DUTY HOURS</Text>
-                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                <Text style={styles.siteMetaChipLabel} numberOfLines={1}>DUTY HOURS</Text>
+                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                   {displayHours}
                 </Text>
               </View>
             </View>
 
             {/* Row 2: Department + Client Code + City / State */}
-            <View style={[styles.siteMetaGrid, { marginTop: 6 }]}>
+            <View style={[styles.siteMetaGrid, { marginTop: ms(6) }]}>
               <View style={styles.siteMetaChip}>
-                <Text style={styles.siteMetaChipLabel}>DEPARTMENT</Text>
-                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                <Text style={styles.siteMetaChipLabel} numberOfLines={1}>DEPARTMENT</Text>
+                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                   {deptCode || '—'}
                 </Text>
               </View>
 
               <View style={styles.siteMetaChip}>
-                <Text style={styles.siteMetaChipLabel}>CLIENT CODE</Text>
-                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                <Text style={styles.siteMetaChipLabel} numberOfLines={1}>CLIENT CODE</Text>
+                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                   {clientCode || '—'}
                 </Text>
               </View>
 
               <View style={styles.siteMetaChip}>
-                <Text style={styles.siteMetaChipLabel}>CITY / REGION</Text>
-                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
+                <Text style={styles.siteMetaChipLabel} numberOfLines={1}>CITY / REGION</Text>
+                <Text style={styles.siteMetaChipValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>
                   {[locationCity, clientWiseState].filter(Boolean).join(', ') || '—'}
                 </Text>
               </View>
@@ -1070,19 +1280,71 @@ export const GeofencePunchScreen: React.FC = () => {
         )}
       </View>
 
+      {/* ── Work Mode Selector (On-Site / WFH / Offsite) – Top Level below Details Card ── */}
+      <View style={{ marginHorizontal: ms(16), marginBottom: ms(12) }}>
+        <Text style={{ fontSize: ms(12), fontWeight: '700', color: '#334155', letterSpacing: 0.2, marginBottom: ms(6) }}>
+          WORK LOCATION MODE
+        </Text>
+        <View style={{ flexDirection: 'row', gap: ms(8) }}>
+          {(
+            [
+              { key: 'ONSITE', label: '🏢 On-Site', activeBg: '#ECFDF5', activeBorder: '#059669', activeText: '#065F46' },
+              { key: 'WFH', label: '🏠 WFH', activeBg: '#EFF6FF', activeBorder: '#2563EB', activeText: '#1E40AF' },
+              { key: 'OFFSITE', label: '🚗 Offsite', activeBg: '#FFFBEB', activeBorder: '#D97706', activeText: '#92400E' },
+            ] as const
+          ).map((item) => {
+            const isActive = selectedMode === item.key;
+            const locked = shiftPunchState.hasPunchedIn && !shiftPunchState.hasPunchedOut;
+            return (
+              <TouchableOpacity
+                key={item.key}
+                activeOpacity={locked ? 1 : 0.75}
+                disabled={locked}
+                onPress={() => setSelectedMode(item.key)}
+                style={{
+                  flex: 1,
+                  paddingVertical: ms(9),
+                  paddingHorizontal: ms(6),
+                  borderRadius: ms(10),
+                  borderWidth: isActive ? 1.5 : 1,
+                  borderColor: isActive ? item.activeBorder : '#E2E8F0',
+                  backgroundColor: isActive ? item.activeBg : '#FFFFFF',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: locked && !isActive ? 0.45 : 1,
+                }}
+              >
+                <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.75}
+                  style={{
+                    fontSize: ms(12.5),
+                    fontWeight: isActive ? '700' : '600',
+                    color: isActive ? item.activeText : '#64748B',
+                  }}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
       {/* ── Real-Time Interactive Map Card ── */}
       <View style={styles.card}>
         <View style={styles.cardHeaderRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: ms(6), flex: 1, minWidth: 0 }}>
             <AppIcon name="map-pin" size={16} color="#0F172A" />
-            <Text style={styles.cardTitle}>Live Location Radar</Text>
+            <Text style={styles.cardTitle} numberOfLines={1}>Live Location Radar</Text>
           </View>
           <TouchableOpacity
             style={styles.expandBadge}
-            activeOpacity={0.7}
+            activeOpacity={0.75}
             onPress={() => setIsMapModalVisible(true)}
           >
-            <AppIcon name="maximize" size={13} color={colors.primary} />
+            <AppIcon name="maximize" size={12} color="#0F766E" />
             <Text style={styles.expandBadgeText}>Full Screen</Text>
           </TouchableOpacity>
         </View>
@@ -1106,7 +1368,7 @@ export const GeofencePunchScreen: React.FC = () => {
           />
 
           <View style={styles.mapTapToExpandBar}>
-            <AppIcon name="location" size={12} color="#FFFFFF" />
+            <AppIcon name="maximize" size={11} color="#FFFFFF" />
             <Text style={styles.mapTapToExpandText}>Tap map to open full interactive view</Text>
           </View>
         </TouchableOpacity>
@@ -1117,28 +1379,28 @@ export const GeofencePunchScreen: React.FC = () => {
             {gpsLoading && currentLat === null ? (
               <View style={[styles.gpsPill, styles.gpsPillLoading]}>
                 <ActivityIndicator size="small" color="#3B82F6" />
-                <Text style={[styles.gpsPillText, { color: '#1D4ED8' }]} numberOfLines={1}>
+                <Text style={[styles.gpsPillText, { color: '#1D4ED8' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   Acquiring Live GPS Satellite Lock...
                 </Text>
               </View>
             ) : gpsError ? (
               <View style={[styles.gpsPill, styles.gpsPillError]}>
                 <View style={[styles.gpsPulseDot, styles.gpsPulseDotError]} />
-                <Text style={[styles.gpsPillText, { color: '#DC2626' }]} numberOfLines={1}>
+                <Text style={[styles.gpsPillText, { color: '#DC2626' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   GPS Signal Weak / Disabled
                 </Text>
               </View>
             ) : insideGeofence ? (
               <View style={[styles.gpsPill, styles.gpsPillSuccess]}>
                 <View style={[styles.gpsPulseDot, styles.gpsPulseDotSuccess]} />
-                <Text style={[styles.gpsPillText, { color: '#059669' }]} numberOfLines={1}>
+                <Text style={[styles.gpsPillText, { color: '#059669' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   ✓ Inside Station Perimeter ({distanceMeters}m away)
                 </Text>
               </View>
             ) : (
               <View style={[styles.gpsPill, styles.gpsPillError]}>
                 <View style={[styles.gpsPulseDot, styles.gpsPulseDotError]} />
-                <Text style={[styles.gpsPillText, { color: '#DC2626' }]} numberOfLines={1}>
+                <Text style={[styles.gpsPillText, { color: '#DC2626' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
                   ✗ Outside Perimeter ({distanceMeters}m away)
                 </Text>
               </View>
@@ -1155,11 +1417,11 @@ export const GeofencePunchScreen: React.FC = () => {
           </View>
 
           {currentLat !== null && currentLon !== null ? (
-            <Text style={styles.gpsCoordsText} numberOfLines={1}>
+            <Text style={styles.gpsCoordsText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
               Phone GPS: {currentLat.toFixed(5)}°N, {currentLon.toFixed(5)}°E {gpsAccuracy ? `(±${gpsAccuracy}m)` : ''}
             </Text>
           ) : (
-            <Text style={styles.gpsCoordsText} numberOfLines={1}>
+            <Text style={styles.gpsCoordsText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>
               Ensure device Location (GPS) is turned ON in Android quick settings.
             </Text>
           )}
@@ -1169,9 +1431,9 @@ export const GeofencePunchScreen: React.FC = () => {
       {/* ── Biometric Camera Selfie Card (Front Camera Only) ── */}
       <View style={styles.card}>
         <View style={styles.cardHeaderRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: ms(6), flex: 1, minWidth: 0 }}>
             <AppIcon name="camera" size={16} color="#0F172A" />
-            <Text style={styles.cardTitle}>Identity & Face Verification</Text>
+            <Text style={styles.cardTitle} numberOfLines={1}>Identity & Face Verification</Text>
           </View>
           {capturedImageUri && (
             <View style={styles.verifiedMiniTag}>
@@ -1292,7 +1554,7 @@ export const GeofencePunchScreen: React.FC = () => {
           style={[
             styles.punchActionCard,
             styles.punchInCard,
-            (shiftPunchState.hasPunchedIn || !capturedImageUri || currentLat === null || !insideGeofence) && styles.punchCardDisabled,
+            (shiftPunchState.hasPunchedIn || !capturedImageUri || currentLat === null || !canSatisfyLocation) && styles.punchCardDisabled,
           ]}
           activeOpacity={shiftPunchState.hasPunchedIn ? 1 : 0.88}
           disabled={shiftPunchState.hasPunchedIn || punchLoading}
@@ -1343,7 +1605,7 @@ export const GeofencePunchScreen: React.FC = () => {
           style={[
             styles.punchActionCard,
             styles.punchOutCard,
-            (!shiftPunchState.hasPunchedIn || !capturedImageUri || currentLat === null || !insideGeofence) && styles.punchCardDisabled,
+            (!shiftPunchState.hasPunchedIn || !capturedImageUri || currentLat === null || !canSatisfyLocation) && styles.punchCardDisabled,
           ]}
           activeOpacity={!shiftPunchState.hasPunchedIn ? 1 : 0.88}
           disabled={!shiftPunchState.hasPunchedIn || punchLoading}
@@ -1411,12 +1673,16 @@ export const GeofencePunchScreen: React.FC = () => {
 
         <View style={styles.checkItemRow}>
           <AppIcon
-            name={insideGeofence ? 'check' : 'close'}
+            name={canSatisfyLocation ? 'check' : 'close'}
             size={16}
-            color={insideGeofence ? '#059669' : '#DC2626'}
+            color={canSatisfyLocation ? '#059669' : '#DC2626'}
           />
           <Text style={styles.checkItemText}>
-            {distanceMeters !== null
+            {isModeBypassed
+              ? selectedMode === 'WFH'
+                ? 'Work From Home (WFH)'
+                : 'Offsite / Field Visit'
+              : distanceMeters !== null
               ? insideGeofence
                 ? `Within ${geofenceRadius}m Geofence (${distanceMeters}m from site)`
                 : `Outside ${geofenceRadius}m Geofence (${distanceMeters}m away)`
@@ -1445,7 +1711,7 @@ export const GeofencePunchScreen: React.FC = () => {
       >
         <View style={styles.modalBackdrop}>
           <View style={[styles.modalHeader, { paddingTop: topInset, height: ms(54) + topInset }]}>
-            <View style={{ flex: 1 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={styles.modalHeaderTitle} numberOfLines={1}>🗺️ Live Location Radar</Text>
               <Text style={styles.unitSubtitle} numberOfLines={1}>Pinch to zoom • Drag to explore</Text>
             </View>
@@ -1455,7 +1721,7 @@ export const GeofencePunchScreen: React.FC = () => {
               onPress={() => setIsMapModalVisible(false)}
               hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
             >
-              <AppIcon name="close" size={22} color={colors.textPrimary} />
+              <AppIcon name="close" size={18} color="#0F172A" />
             </TouchableOpacity>
           </View>
 

@@ -53,11 +53,11 @@ export const styles = StyleSheet.create({
   },
   scrollList: {
     width: '100%',
-    maxHeight: ms(260),
+    maxHeight: ms(320),
     marginBottom: ms(8),
   },
   scrollContent: {
-    paddingBottom: ms(2),
+    paddingBottom: ms(4),
   },
   permissionItem: {
     flexDirection: 'row',
@@ -111,6 +111,49 @@ export const styles = StyleSheet.create({
     fontSize: ms(10),
     color: '#64748B',
     lineHeight: ms(13.5),
+  },
+  bgInstructionBox: {
+    marginTop: ms(6),
+    backgroundColor: '#F0FDF4',
+    padding: ms(7),
+    borderRadius: ms(8),
+    borderWidth: 1,
+    borderColor: '#DCFCE7',
+  },
+  bgInstructionText: {
+    fontSize: ms(9.5),
+    color: '#15803D',
+    lineHeight: ms(13),
+    marginBottom: ms(2),
+  },
+  bgInstructionBold: {
+    fontWeight: '700',
+    color: '#166534',
+  },
+  bgPrivacyText: {
+    fontSize: ms(8.5),
+    color: '#475569',
+    lineHeight: ms(11.5),
+  },
+  privacyStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: ms(5),
+    backgroundColor: '#F8FAFC',
+    borderRadius: ms(8),
+    paddingVertical: ms(6),
+    paddingHorizontal: ms(8),
+    marginTop: ms(2),
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  privacyText: {
+    fontSize: ms(9),
+    color: '#64748B',
+    fontWeight: '500',
+    textAlign: 'center',
+    flex: 1,
   },
   actionsContainer: {
     width: '100%',

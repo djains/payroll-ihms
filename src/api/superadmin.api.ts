@@ -349,6 +349,13 @@ export const superadminApi = {
   },
 
   /**
+   * Update an existing Leave Policy with nested Leave Types -> PUT /api/leave/policies/{id}/
+   */
+  async updateLeavePolicy(policyId: number, payload: Partial<CreateLeavePolicyPayload>) {
+    return apiClient.put<BackendLeavePolicy>(`${API_ENDPOINTS.LEAVE_POLICIES}${policyId}/`, payload);
+  },
+
+  /**
    * Submit / Activate Policy & Provision Balances to All Company Employees -> POST /api/leave/policies/{id}/submit/
    */
   async submitLeavePolicy(policyId: number) {

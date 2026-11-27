@@ -2,17 +2,26 @@ import { create } from './createStore';
 import { apiClient, staffApi } from '../api';
 import { ANDROID_API_KEY, API_ENDPOINTS } from '../api/config';
 
+export type WorkMode = 'ONSITE' | 'WFH' | 'OFFSITE';
+
 interface ShiftTrackingState {
   isShiftActive: boolean;
+  workMode: WorkMode;
   setShiftActive: (active: boolean) => void;
+  setWorkMode: (mode: WorkMode) => void;
   syncTodayShiftStatus: (empCode: string) => Promise<void>;
 }
 
 export const useShiftTrackingStore = create<ShiftTrackingState>((set) => ({
   isShiftActive: false,
+  workMode: 'ONSITE',
 
   setShiftActive: (active: boolean) => {
     set({ isShiftActive: active });
+  },
+
+  setWorkMode: (mode: WorkMode) => {
+    set({ workMode: mode });
   },
 
   syncTodayShiftStatus: async (empCode: string) => {
@@ -54,16 +63,53 @@ export const useShiftTrackingStore = create<ShiftTrackingState>((set) => ({
             return raw.startsWith(todayDash) || raw.includes(todaySlash);
           });
 
-          if (todayPunch) {
+          // Check for active night shift from yesterday (within last 18 hours)
+          let punchToUse = todayPunch;
+          if (!todayPunch) {
+            const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+            const yDash = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+            const ySlash = `${String(yesterday.getDate()).padStart(2, '0')}/${String(yesterday.getMonth() + 1).padStart(2, '0')}/${yesterday.getFullYear()}`;
+
+            const yestPunch = logsList.find((log: any) => {
+              const raw = String(
+                log.date_time || log.Date_Time || log.attendances_intime || log.camera_intime || ''
+              ).trim();
+              return raw.startsWith(yDash) || raw.includes(ySlash);
+            });
+
+            if (yestPunch) {
+              const yIn = yestPunch.camera_intime || yestPunch.Camera_intime || yestPunch.attendances_intime;
+              const yOut = yestPunch.camera_outtime || yestPunch.Camera_outtime || yestPunch.attendances_outtime;
+              if (yIn && (!yOut || yOut === '--:--')) {
+                try {
+                  const inD = new Date(String(yIn).replace(' ', 'T'));
+                  const diffH = (now.getTime() - inD.getTime()) / (1000 * 60 * 60);
+                  if (diffH >= 0 && diffH < 18) {
+                    punchToUse = yestPunch;
+                  }
+                } catch {
+                  punchToUse = yestPunch;
+                }
+              }
+            }
+          }
+
+          if (punchToUse) {
             const rawIn =
-              todayPunch.camera_intime ||
-              todayPunch.Camera_intime ||
-              todayPunch.attendances_intime;
+              punchToUse.camera_intime ||
+              punchToUse.Camera_intime ||
+              punchToUse.attendances_intime;
             const rawOut =
-              todayPunch.camera_outtime ||
-              todayPunch.Camera_outtime ||
-              todayPunch.attendances_outtime;
-            set({ isShiftActive: Boolean(rawIn) && !Boolean(rawOut) });
+              punchToUse.camera_outtime ||
+              punchToUse.Camera_outtime ||
+              punchToUse.attendances_outtime;
+            const rawAddr = String(punchToUse.address || punchToUse.ADDRESS || '').trim().toUpperCase();
+            const inferredMode: WorkMode = rawAddr.startsWith('[WFH]')
+              ? 'WFH'
+              : rawAddr.startsWith('[OFFSITE]')
+              ? 'OFFSITE'
+              : 'ONSITE';
+            set({ isShiftActive: Boolean(rawIn) && !Boolean(rawOut), workMode: inferredMode });
             return;
           }
         }

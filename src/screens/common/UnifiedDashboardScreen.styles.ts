@@ -3,7 +3,7 @@ import { spacing, borderRadius, shadows, fontSizes, ms } from '../../theme';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_GAP = ms(10);
-const CARD_WIDTH = (SCREEN_WIDTH - spacing.md * 2 - GRID_GAP * 2) / 3;
+const CARD_WIDTH = Math.floor((SCREEN_WIDTH - spacing.md * 2 - GRID_GAP * 2 - 2) / 3);
 
 export const styles = StyleSheet.create({
   container: {
@@ -70,7 +70,7 @@ export const styles = StyleSheet.create({
     borderRadius: borderRadius.full,
   },
   liveClockText: {
-    fontSize: fontSizes.xxs,
+    fontSize: fontSizes.xs,
     color: '#0F766E',
     fontWeight: '700',
     letterSpacing: 0.2,
@@ -422,7 +422,7 @@ export const styles = StyleSheet.create({
     gap: ms(6),
   },
   punchCardTitle: {
-    fontSize: fontSizes.sm + 1,
+    fontSize: fontSizes.md,
     fontWeight: '800',
     color: '#0F172A',
     letterSpacing: -0.2,
@@ -433,8 +433,8 @@ export const styles = StyleSheet.create({
     borderRadius: ms(4),
   },
   punchCardSubtitle: {
-    fontSize: fontSizes.xxs + 1,
-    color: '#64748B',
+    fontSize: fontSizes.xs + 1,
+    color: '#475569',
     fontWeight: '600',
     marginTop: ms(2),
   },
@@ -443,12 +443,12 @@ export const styles = StyleSheet.create({
     alignItems: 'center',
     gap: ms(4),
     paddingHorizontal: ms(9),
-    paddingVertical: ms(3),
+    paddingVertical: ms(3.5),
     borderRadius: borderRadius.full,
     borderWidth: 1,
   },
   punchStatusPillText: {
-    fontSize: fontSizes.xxs,
+    fontSize: fontSizes.xs,
     fontWeight: '800',
     letterSpacing: 0.3,
   },

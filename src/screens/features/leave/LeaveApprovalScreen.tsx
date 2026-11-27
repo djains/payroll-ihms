@@ -22,7 +22,7 @@ import {
   CustomAlertButton,
 } from '../../../components/common';
 import { useNavigation } from '../../../navigation/navigationContext';
-import { staffApi } from '../../../api';
+import { staffApi, superadminApi, BackendUnit, apiClient, API_ENDPOINTS } from '../../../api';
 import { showToast } from '../../../store/toastStore';
 
 interface LeaveApplicationItem {
@@ -42,12 +42,17 @@ interface LeaveApplicationItem {
   leave_approved_date?: string;
   reporing_to?: string;
   manager?: string;
+  unit_code?: string;
 }
 
 export const LeaveApprovalScreen: React.FC = () => {
   const { goBack } = useNavigation();
 
   const [applications, setApplications] = useState<LeaveApplicationItem[]>([]);
+  const [units, setUnits] = useState<BackendUnit[]>([]);
+  const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('ALL');
+  const [empUnitMap, setEmpUnitMap] = useState<Record<string, string>>({});
+
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -75,9 +80,14 @@ export const LeaveApprovalScreen: React.FC = () => {
 
   const fetchLeaveRequests = async () => {
     try {
-      const res = await staffApi.getManageLeaveApplications();
-      if (res.success && res.data) {
-        const raw = res.data;
+      const [leaveRes, unitsRes, empRes] = await Promise.all([
+        staffApi.getManageLeaveApplications(),
+        superadminApi.getUnits().catch(() => ({ success: false, data: [] })),
+        apiClient.get<any>(`${API_ENDPOINTS.EMPLOYEES}?page=1&page_size=all`).catch(() => ({ success: false, data: [] })),
+      ]);
+
+      if (leaveRes.success && leaveRes.data) {
+        const raw = leaveRes.data;
         const list: LeaveApplicationItem[] = Array.isArray(raw)
           ? raw
           : Array.isArray(raw.results)
@@ -86,6 +96,26 @@ export const LeaveApprovalScreen: React.FC = () => {
         setApplications(list);
       } else {
         setApplications([]);
+      }
+
+      if (unitsRes.success && unitsRes.data) {
+        const uList: BackendUnit[] = Array.isArray(unitsRes.data)
+          ? unitsRes.data
+          : unitsRes.data.results || [];
+        setUnits(uList);
+      }
+
+      if (empRes.success && empRes.data) {
+        const eList = Array.isArray(empRes.data)
+          ? empRes.data
+          : empRes.data.results || [];
+        const uMap: Record<string, string> = {};
+        eList.forEach((e: any) => {
+          if (e.emp_code && e.unit_code) {
+            uMap[e.emp_code] = e.unit_code;
+          }
+        });
+        setEmpUnitMap(uMap);
       }
     } catch (e: any) {
       console.warn('[LeaveApprovalScreen] Fetch error:', e);
@@ -228,12 +258,21 @@ export const LeaveApprovalScreen: React.FC = () => {
     }
   };
 
-  // Counts for tabs
+  // Applications filtered by selected unit
+  const unitApplications = useMemo(() => {
+    if (selectedUnitFilter === 'ALL') return applications;
+    return applications.filter((app) => {
+      const u = (app.unit_code || empUnitMap[app.emp_code] || '').trim();
+      return u.toLowerCase() === selectedUnitFilter.trim().toLowerCase();
+    });
+  }, [applications, selectedUnitFilter, empUnitMap]);
+
+  // Counts for tabs based on current unit selection
   const tabCounts = useMemo(() => {
     let pending = 0;
     let approved = 0;
     let rejected = 0;
-    applications.forEach((app) => {
+    unitApplications.forEach((app) => {
       const st = (app.leave_status || '').toLowerCase();
       if (st === 'approved') approved++;
       else if (st === 'rejected') rejected++;
@@ -243,13 +282,13 @@ export const LeaveApprovalScreen: React.FC = () => {
       pending,
       approved,
       rejected,
-      all: applications.length,
+      all: unitApplications.length,
     };
-  }, [applications]);
+  }, [unitApplications]);
 
-  // Filtered List
+  // Filtered List based on unit + tab + search
   const filteredApplications = useMemo(() => {
-    return applications.filter((app) => {
+    return unitApplications.filter((app) => {
       const st = (app.leave_status || '').toLowerCase();
       let matchTab = true;
       if (activeTab === 'PENDING') {
@@ -265,14 +304,16 @@ export const LeaveApprovalScreen: React.FC = () => {
       const q = searchQuery.toLowerCase().trim();
       if (!q) return true;
 
+      const u = (app.unit_code || empUnitMap[app.emp_code] || '').toLowerCase();
       return (
         (app.emp_name && app.emp_name.toLowerCase().includes(q)) ||
         (app.emp_code && app.emp_code.toLowerCase().includes(q)) ||
         (app.leave_type && app.leave_type.toLowerCase().includes(q)) ||
-        (app.leave_reason && app.leave_reason.toLowerCase().includes(q))
+        (app.leave_reason && app.leave_reason.toLowerCase().includes(q)) ||
+        u.includes(q)
       );
     });
-  }, [applications, activeTab, searchQuery]);
+  }, [unitApplications, activeTab, searchQuery, empUnitMap]);
 
   const renderLeaveCard = ({ item }: { item: LeaveApplicationItem }) => {
     const isPending = (item.leave_status || '').toLowerCase() === 'pending';
@@ -280,6 +321,7 @@ export const LeaveApprovalScreen: React.FC = () => {
     const isRejected = (item.leave_status || '').toLowerCase() === 'rejected';
     const initial = (item.emp_name || item.emp_code || 'W').charAt(0).toUpperCase();
     const isBusy = actionInProgressId === item.leave_id;
+    const workerUnit = (item.unit_code || empUnitMap[item.emp_code] || '').trim();
 
     return (
       <View style={styles.leaveCard}>
@@ -293,6 +335,12 @@ export const LeaveApprovalScreen: React.FC = () => {
             <Text style={styles.workerSubText}>
               ID: {item.emp_code} • Type: {item.leave_type}
             </Text>
+            <View style={styles.unitBadgeRow}>
+              <AppIcon name="location" size={10} color="#0F766E" />
+              <Text style={styles.unitBadgeRowText} numberOfLines={1}>
+                Unit: {workerUnit || 'General Site'}
+              </Text>
+            </View>
           </View>
           <View
             style={[
@@ -400,7 +448,101 @@ export const LeaveApprovalScreen: React.FC = () => {
         />
       }
     >
-      {/* Search Bar */}
+      {/* 1. Dynamic Unit Selector Filter Bar (FIRST - BEFORE SEARCH & STATUS) */}
+      <View style={styles.unitFilterContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.unitFilterScroll}
+        >
+          {/* ALL UNITS TAB */}
+          <TouchableOpacity
+            style={[
+              styles.unitChip,
+              selectedUnitFilter === 'ALL' && styles.unitChipActive,
+            ]}
+            onPress={() => setSelectedUnitFilter('ALL')}
+            activeOpacity={0.8}
+          >
+            <AppIcon
+              name="building"
+              size={12}
+              color={selectedUnitFilter === 'ALL' ? '#FFFFFF' : '#0F766E'}
+            />
+            <Text
+              style={[
+                styles.unitChipText,
+                selectedUnitFilter === 'ALL' && styles.unitChipTextActive,
+              ]}
+            >
+              All Units
+            </Text>
+            <View
+              style={[
+                styles.unitBadge,
+                selectedUnitFilter === 'ALL' && styles.unitBadgeActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.unitBadgeText,
+                  selectedUnitFilter === 'ALL' && styles.unitBadgeTextActive,
+                ]}
+              >
+                {applications.length}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
+          {/* DYNAMIC UNITS FETCHED FROM MYSQL */}
+          {units.map((u) => {
+            const isSelected = selectedUnitFilter === u.unit_code;
+            const uCount = applications.filter(
+              (a) => (a.unit_code || empUnitMap[a.emp_code] || '').trim() === u.unit_code.trim()
+            ).length;
+
+            return (
+              <TouchableOpacity
+                key={u.unit_code}
+                style={[styles.unitChip, isSelected && styles.unitChipActive]}
+                onPress={() => setSelectedUnitFilter(u.unit_code)}
+                activeOpacity={0.8}
+              >
+                <AppIcon
+                  name="location"
+                  size={12}
+                  color={isSelected ? '#FFFFFF' : '#64748B'}
+                />
+                <Text
+                  style={[styles.unitChipText, isSelected && styles.unitChipTextActive]}
+                  numberOfLines={1}
+                >
+                  {u.unit_code} - {u.unit_name}
+                </Text>
+                {uCount > 0 && (
+                  <View
+                    style={[
+                      styles.unitBadge,
+                      isSelected && styles.unitBadgeActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.unitBadgeText,
+                        isSelected && styles.unitBadgeTextActive,
+                      ]}
+                    >
+                      {uCount}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* 2. Search Bar */}
       <View style={styles.searchSection}>
         <View style={styles.searchInputWrap}>
           <AppIcon name="search" size={16} color="#64748B" />
@@ -506,8 +648,12 @@ export const LeaveApprovalScreen: React.FC = () => {
                   : `No ${activeTab.toLowerCase()} requests`}
               </Text>
               <Text style={styles.emptySubtitle}>
-                {activeTab === 'PENDING'
-                  ? 'Great job! All leave applications from your unit have been reviewed.'
+                {selectedUnitFilter !== 'ALL'
+                  ? `No leave applications found for Unit ${selectedUnitFilter}.`
+                  : searchQuery
+                  ? 'No applications match your search query.'
+                  : activeTab === 'PENDING'
+                  ? 'Great job! All leave applications have been reviewed.'
                   : 'There are no leave applications matching this filter.'}
               </Text>
             </View>

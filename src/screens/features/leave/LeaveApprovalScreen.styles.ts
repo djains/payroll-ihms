@@ -36,6 +36,59 @@ export const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: ms(6),
   },
+  // Unit Filter Tabs at the Top
+  unitFilterContainer: {
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  unitFilterScroll: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: ms(8),
+    gap: ms(8),
+  },
+  unitChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(6),
+    paddingHorizontal: ms(12),
+    paddingVertical: ms(6),
+    borderRadius: borderRadius.full,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  unitChipActive: {
+    backgroundColor: '#0F766E',
+    borderColor: '#0F766E',
+  },
+  unitChipText: {
+    fontSize: fontSizes.xs,
+    fontWeight: '600',
+    color: '#475569',
+    maxWidth: ms(160),
+  },
+  unitChipTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+  },
+  unitBadge: {
+    backgroundColor: '#E2E8F0',
+    paddingHorizontal: ms(6),
+    paddingVertical: ms(1),
+    borderRadius: borderRadius.full,
+  },
+  unitBadgeActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  unitBadgeText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  unitBadgeTextActive: {
+    color: '#FFFFFF',
+  },
   tabChip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -125,6 +178,24 @@ export const styles = StyleSheet.create({
     fontSize: fontSizes.xxs + 1,
     color: '#64748B',
     marginTop: ms(1),
+  },
+  unitBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: ms(3),
+    backgroundColor: '#F0FDFA',
+    borderWidth: 1,
+    borderColor: '#CCFBF1',
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: ms(6),
+    paddingVertical: ms(2),
+    alignSelf: 'flex-start',
+    marginTop: ms(3),
+  },
+  unitBadgeRowText: {
+    fontSize: fontSizes.xxs,
+    fontWeight: '700',
+    color: '#0F766E',
   },
   statusBadge: {
     paddingHorizontal: ms(9),

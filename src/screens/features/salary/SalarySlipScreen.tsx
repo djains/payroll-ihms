@@ -244,29 +244,35 @@ export const SalarySlipScreen: React.FC = () => {
           }
         } catch {}
 
-        // Fetch company metadata from master_company so payslip header reflects live DB company
+        // Fetch company metadata safely (avoids 403 on master companies endpoint for staff)
         try {
-          const compRes = await apiClient.get<any>(`${API_ENDPOINTS.COMPANIES}?page=1`);
-          if (compRes.success && compRes.data) {
-            const cList = Array.isArray(compRes.data)
-              ? compRes.data
-              : compRes.data.results || [];
-            const targetCompCode = fetchedProfile?.client_code || fetchedProfile?.comp_code;
-            const compObj =
-              cList.find((c: any) => targetCompCode && c.comp_code === targetCompCode) ||
-              cList[0];
-            if (compObj) {
-              const addr2 = [compObj.address2, compObj.city, compObj.pin, compObj.state]
-                .filter(Boolean)
-                .join(', ');
-              setCompanyMeta({
-                companyName: compObj.company_name,
-                companyAddress1: compObj.address1 || '',
-                companyAddress2: addr2,
-              });
-            }
+          const logoRes = await apiClient.get<any>('/api/masters/company-logo/');
+          if (logoRes.success && logoRes.data?.company_name) {
+            const compObj = logoRes.data;
+            const addr2 = [compObj.address2, compObj.city, compObj.pin, compObj.state]
+              .filter(Boolean)
+              .join(', ');
+            setCompanyMeta({
+              companyName: compObj.company_name,
+              companyAddress1: compObj.address1 || '',
+              companyAddress2: addr2,
+            });
+          } else if (currentCompany) {
+            setCompanyMeta({
+              companyName: currentCompany.name,
+              companyAddress1: (currentCompany as any).address1 || currentCompany.address || '',
+              companyAddress2: (currentCompany as any).address2 || currentCompany.city || '',
+            });
           }
-        } catch {}
+        } catch {
+          if (currentCompany) {
+            setCompanyMeta({
+              companyName: currentCompany.name,
+              companyAddress1: (currentCompany as any).address1 || currentCompany.address || '',
+              companyAddress2: (currentCompany as any).address2 || currentCompany.city || '',
+            });
+          }
+        }
 
         // Optional: fetch staff-salary-details to enrich base structure heads (head1..head15, ctc_amount, month_total)
         let staffDetailsRow: Record<string, any> | null = null;

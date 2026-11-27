@@ -286,19 +286,18 @@ export const styles = StyleSheet.create({
   expandBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: ms(4),
-    backgroundColor: colors.surfaceVariant,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: ms(3),
+    gap: ms(5),
+    backgroundColor: '#F0FDFA',
+    paddingHorizontal: ms(10),
+    paddingVertical: ms(4),
     borderRadius: borderRadius.full,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: '#CCFBF1',
   },
   expandBadgeText: {
-    ...typography.caption,
     fontSize: fontSizes.xxs,
-    fontWeight: '600',
-    color: colors.primary,
+    fontWeight: '700',
+    color: '#0F766E',
   },
 
   // ── Map Container ─────────────────────────────────────────────────────

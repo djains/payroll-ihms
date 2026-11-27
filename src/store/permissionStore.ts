@@ -23,11 +23,12 @@ interface PermissionStoreState {
   // Actions
   checkPermissions: (force?: boolean) => Promise<boolean>;
   requestPermissions: () => Promise<boolean>;
+  showModal: () => void;
   hideModal: () => void;
   markAsSeen: () => Promise<void>;
   resetSeenFlag: () => Promise<void>;
 
-  // Background Location Actions
+  // Background Location Actions (unified with main modal)
   showBackgroundModal: () => void;
   hideBackgroundModal: () => void;
   checkBackgroundPermission: () => Promise<boolean>;
@@ -123,6 +124,8 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     }
   },
 
+  showModal: () => set({ isModalVisible: true }),
+
   hideModal: () => {
     const { status } = get();
     // Modal can only be dismissed if compulsory permissions are granted
@@ -131,8 +134,9 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
     }
   },
 
-  showBackgroundModal: () => set({ isBackgroundModalVisible: true }),
-  hideBackgroundModal: () => set({ isBackgroundModalVisible: false }),
+  // Backward-compatible unified trigger
+  showBackgroundModal: () => set({ isModalVisible: true }),
+  hideBackgroundModal: () => set({ isModalVisible: false }),
 
   checkBackgroundPermission: async () => {
     const granted = await checkBackgroundLocationPermission();
@@ -142,7 +146,7 @@ export const usePermissionStore = create<PermissionStoreState>((set, get) => ({
 
   requestBackgroundPermission: async () => {
     const granted = await requestBackgroundLocationPermission();
-    set({ isBackgroundGranted: granted, isBackgroundModalVisible: !granted });
+    set({ isBackgroundGranted: granted });
     return granted;
   },
 }));

@@ -66,6 +66,7 @@ class ShiftTrackingService : Service() {
     private var isOutsideUnit: Boolean = false
     private var cachedAddress: String = ""
     private var lastReverseGeoTimeMs: Long = 0L
+    private var lastPingSentTimeMs: Long = 0L
 
     private val locationListener = object : LocationListener {
         override fun onLocationChanged(location: Location) {
@@ -228,8 +229,8 @@ class ShiftTrackingService : Service() {
             if (lm.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
                 lm.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    10_000L,
-                    5f,
+                    15_000L,
+                    20f, // Movement-based (smallestDisplacement = 20m)
                     locationListener,
                     Looper.getMainLooper()
                 )
@@ -244,8 +245,8 @@ class ShiftTrackingService : Service() {
             if (lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
                 lm.requestLocationUpdates(
                     LocationManager.NETWORK_PROVIDER,
-                    15_000L,
-                    10f,
+                    20_000L,
+                    20f, // Movement-based (smallestDisplacement = 20m)
                     locationListener,
                     Looper.getMainLooper()
                 )
@@ -258,7 +259,20 @@ class ShiftTrackingService : Service() {
     }
 
     private fun handleLocation(location: Location) {
-        if (location.hasAccuracy() && location.accuracy > 45f) {
+        // 1. Block Mock / Fake GPS locations
+        val isMock = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            location.isMock
+        } else {
+            @Suppress("DEPRECATION")
+            location.isFromMockProvider
+        }
+        if (isMock) {
+            Log.w(TAG, "Mock/Fake GPS location rejected")
+            return
+        }
+
+        // 2. Reject low-accuracy GPS readings (> 30 meters) to avoid false jumps
+        if (location.hasAccuracy() && location.accuracy > 30f) {
             return
         }
 
@@ -266,7 +280,13 @@ class ShiftTrackingService : Service() {
         val currentLon = location.longitude
         if (currentLat == 0.0 || currentLon == 0.0) return
 
-        // 20-Meter Movement Tracker (matches LiveShiftTracker rules)
+        // Enforce 30-second minimum cooldown to prevent repeated API spam
+        val nowMs = System.currentTimeMillis()
+        if (lastPingSentTimeMs > 0L && (nowMs - lastPingSentTimeMs) < 30_000L) {
+            return
+        }
+
+        // 3. Movement Tracker with Hysteresis (20m inside, >30m outside to prevent boundary flip-flop)
         if (unitLat != 0.0 && unitLon != 0.0) {
             val distFromUnit = getDistanceMeters(currentLat, currentLon, unitLat, unitLon)
             if (distFromUnit <= 20.0) {
@@ -276,10 +296,13 @@ class ShiftTrackingService : Service() {
                 return
             }
 
-            if (!isOutsideUnit || lastLoggedLat == 0.0) {
-                isOutsideUnit = true
-                val distText = "${distFromUnit.roundToInt()}m from site"
-                sendPingToBackend(currentLat, currentLon, distText)
+            if (!isOutsideUnit) {
+                // Only trigger out-of-location ping if strictly > 30m (prevents 20m jitter spam)
+                if (distFromUnit > 30.0) {
+                    isOutsideUnit = true
+                    val distText = "${distFromUnit.roundToInt()}m from site"
+                    sendPingToBackend(currentLat, currentLon, distText)
+                }
                 return
             }
         }
@@ -347,6 +370,7 @@ class ShiftTrackingService : Service() {
                 if (code in 200..299) {
                     lastLoggedLat = lat
                     lastLoggedLon = lon
+                    lastPingSentTimeMs = System.currentTimeMillis()
                     Log.d(TAG, "Background GPS ping sent ($code): $lat, $lon")
                 } else {
                     Log.w(TAG, "Background GPS ping HTTP $code")

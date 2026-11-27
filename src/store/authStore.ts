@@ -304,12 +304,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               const targetComp = String(u.scope?.comp_code || sessionData.user.companyId || '').trim();
               if (!employeeCompanyName && targetComp) {
                 try {
-                  const cRes = await apiClient.get<any>(`/api/masters/companies/?search=${encodeURIComponent(targetComp)}`);
-                  if (cRes.success && cRes.data) {
-                    const cList = Array.isArray(cRes.data) ? cRes.data : cRes.data.results || [];
-                    const matchedComp = cList.find((c: any) => String(c.comp_code || '').trim().toUpperCase() === targetComp.toUpperCase());
-                    if (matchedComp) {
-                      employeeCompanyName = matchedComp.company_name || matchedComp.company_short_name || matchedComp.comp_name || '';
+                  // 1. Fetch via authenticated company-logo endpoint (accessible to all active users without 403)
+                  const logoRes = await apiClient.get<any>('/api/masters/company-logo/');
+                  if (logoRes.success && logoRes.data?.company_name) {
+                    employeeCompanyName = logoRes.data.company_name;
+                  } else if (u.is_superuser || u.is_staff) {
+                    const cRes = await apiClient.get<any>(`/api/masters/companies/?search=${encodeURIComponent(targetComp)}`);
+                    if (cRes.success && cRes.data) {
+                      const cList = Array.isArray(cRes.data) ? cRes.data : cRes.data.results || [];
+                      const matchedComp = cList.find((c: any) => String(c.comp_code || '').trim().toUpperCase() === targetComp.toUpperCase());
+                      if (matchedComp) {
+                        employeeCompanyName = matchedComp.company_name || matchedComp.company_short_name || matchedComp.comp_name || '';
+                      }
                     }
                   }
                 } catch {}
@@ -322,7 +328,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
                   company_name: employeeCompanyName,
                 };
               }
-              useSuperAdminStore.getState().fetchLiveCompanies().catch(() => {});
+              if (u.is_staff || u.is_superuser) {
+                useSuperAdminStore.getState().fetchLiveCompanies().catch(() => {});
+              }
 
               const updatedUser: User = {
                 ...sessionData.user,
@@ -637,12 +645,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             if (cachedCompany?.name) {
               employeeCompanyName = cachedCompany.name;
             } else {
-              const cRes = await apiClient.get<any>(`/api/masters/companies/?search=${encodeURIComponent(targetComp)}`);
-              if (cRes.success && cRes.data) {
-                const cList = Array.isArray(cRes.data) ? cRes.data : cRes.data.results || [];
-                const matchedComp = cList.find((c: any) => String(c.comp_code || '').trim().toUpperCase() === targetComp.toUpperCase());
-                if (matchedComp) {
-                  employeeCompanyName = matchedComp.company_name || matchedComp.company_short_name || matchedComp.comp_name || '';
+              // 1. Fetch via authenticated company-logo endpoint (accessible to all active users without 403)
+              const logoRes = await apiClient.get<any>('/api/masters/company-logo/');
+              if (logoRes.success && logoRes.data?.company_name) {
+                employeeCompanyName = logoRes.data.company_name;
+              } else if (u.is_superuser || u.is_staff) {
+                const cRes = await apiClient.get<any>(`/api/masters/companies/?search=${encodeURIComponent(targetComp)}`);
+                if (cRes.success && cRes.data) {
+                  const cList = Array.isArray(cRes.data) ? cRes.data : cRes.data.results || [];
+                  const matchedComp = cList.find((c: any) => String(c.comp_code || '').trim().toUpperCase() === targetComp.toUpperCase());
+                  if (matchedComp) {
+                    employeeCompanyName = matchedComp.company_name || matchedComp.company_short_name || matchedComp.comp_name || '';
+                  }
                 }
               }
             }
@@ -656,7 +670,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             company_name: employeeCompanyName,
           };
         }
-        useSuperAdminStore.getState().fetchLiveCompanies().catch(() => {});
+        if (u.is_staff || u.is_superuser) {
+          useSuperAdminStore.getState().fetchLiveCompanies().catch(() => {});
+        }
 
         const backendUser: User = {
           id: u.username,

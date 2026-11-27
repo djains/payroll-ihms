@@ -6,7 +6,7 @@ import { useShiftTrackingStore } from '../../store/shiftTrackingStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { usePermissionStore } from '../../store/permissionStore';
 import { showToast } from '../../store/toastStore';
-import { apiClient, API_ENDPOINTS } from '../../api';
+import { apiClient, API_ENDPOINTS, staffApi } from '../../api';
 import { ANDROID_API_KEY, apiConfig } from '../../api/config';
 
 const { LiveLocationModule } = NativeModules;
@@ -63,9 +63,6 @@ const TRACKER_HTML = `
 
   startWatching();
   window.pingGps();
-  setInterval(function() {
-    window.pingGps();
-  }, 10000); // Check GPS position every 10 seconds
 </script>
 </body>
 </html>
@@ -97,11 +94,11 @@ function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: num
  */
 export const LiveShiftTracker: React.FC = () => {
   const { isAuthenticated, currentUser } = useAuthStore();
-  const { isShiftActive, syncTodayShiftStatus, setShiftActive } = useShiftTrackingStore();
+  const { isShiftActive, workMode, syncTodayShiftStatus, setShiftActive } = useShiftTrackingStore();
   const webViewRef = useRef<any>(null);
 
   // Unit Center Coordinates state
-  const [unitCoords, setUnitCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [unitCoords, setUnitCoords] = useState<{ lat: number; lon: number; radius?: number } | null>(null);
 
   // References to keep tracking state persistent without causing re-renders
   const lastLoggedRef = useRef<{ lat: number; lon: number } | null>(null);
@@ -109,6 +106,7 @@ export const LiveShiftTracker: React.FC = () => {
   const isSendingRef = useRef<boolean>(false);
   const cachedAddrRef = useRef<string>('');
   const lastReverseGeoTimeRef = useRef<number>(0);
+  const lastPingSentTimeRef = useRef<number>(0);
 
   const empCode = currentUser?.empCode || currentUser?.username || '';
   const role = currentUser?.role;
@@ -136,8 +134,28 @@ export const LiveShiftTracker: React.FC = () => {
     let resolvedLon = currentUser?.assignedUnitLongitude;
 
     if (resolvedLat && resolvedLon && !isNaN(resolvedLat) && !isNaN(resolvedLon)) {
-      setUnitCoords({ lat: resolvedLat, lon: resolvedLon });
+      setUnitCoords({ lat: resolvedLat, lon: resolvedLon, radius: 100 });
       return;
+    }
+
+    // Primary: Fetch live unit coordinates & radius directly from Mobile API
+    if (empCode) {
+      staffApi.getUnitCoords(empCode).then((res: any) => {
+        if (res.success && res.data) {
+          const raw = res.data;
+          const list = Array.isArray(raw) ? raw : (raw as any).results || [raw];
+          const c = list[0];
+          if (c) {
+            const uLat = parseFloat(c.UNIT_LATTITUDE || c.unit_latitude || c.LATTITUDE || '0');
+            const uLon = parseFloat(c.UNIT_LONGTITUDE || c.unit_longitude || c.LONGTITUDE || '0');
+            const rad = parseFloat(c.DISTANCE || c.distance || c.AREA_METERS || c.area_meters || '0');
+            if (!isNaN(uLat) && !isNaN(uLon) && uLat !== 0 && uLon !== 0) {
+              setUnitCoords({ lat: uLat, lon: uLon, radius: rad > 0 ? rad : 100 });
+              return;
+            }
+          }
+        }
+      }).catch(() => {});
     }
 
     // Fallback: Fetch unit coordinates from master_unit / units API
@@ -195,24 +213,26 @@ export const LiveShiftTracker: React.FC = () => {
         if (!fineGranted || cancelled) return;
 
         // Android 10+ (API 29+) requires ACCESS_BACKGROUND_LOCATION for tracking after app close.
-        // Show prominent disclosure modal if permission is not yet granted.
+        // Show unified permission disclosure modal if permission is not yet granted.
         if (typeof Platform.Version === 'number' && Platform.Version >= 29) {
           const bgPerm = 'android.permission.ACCESS_BACKGROUND_LOCATION' as any;
           const bgGranted = await PermissionsAndroid.check(bgPerm);
           if (!bgGranted) {
-            usePermissionStore.getState().showBackgroundModal();
+            usePermissionStore.getState().showModal();
           }
         }
 
         if (cancelled) return;
-        const unitLabel = currentUser?.branchOrUnit || 'Field Location';
+        const baseLabel = currentUser?.branchOrUnit || 'Field Location';
+        const unitLabel =
+          workMode === 'WFH' ? `[WFH] ${baseLabel}` : workMode === 'OFFSITE' ? `[OFFSITE] ${baseLabel}` : baseLabel;
         await LiveLocationModule.startTracking(
           empCode,
           apiConfig.getBaseUrl(),
           ANDROID_API_KEY,
           unitLabel,
-          unitCoords?.lat || 0,
-          unitCoords?.lon || 0
+          workMode === 'ONSITE' ? (unitCoords?.lat || 0) : 0,
+          workMode === 'ONSITE' ? (unitCoords?.lon || 0) : 0
         );
       } catch (e) {
         console.warn('[LiveShiftTracker] Native tracking start error:', e);
@@ -224,7 +244,7 @@ export const LiveShiftTracker: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [useNativeAndroidTracker, isTrackableWorker, isShiftActive, empCode, unitCoords, currentUser?.branchOrUnit]);
+  }, [useNativeAndroidTracker, isTrackableWorker, isShiftActive, workMode, empCode, unitCoords, currentUser?.branchOrUnit]);
 
   if (!isTrackableWorker || !isShiftActive || useNativeAndroidTracker) {
     return null;
@@ -278,8 +298,9 @@ export const LiveShiftTracker: React.FC = () => {
         { 'X-API-Key': ANDROID_API_KEY }
       );
 
-      // Record this point as the last logged position
+      // Record this point and timestamp as the last logged position
       lastLoggedRef.current = { lat, lon };
+      lastPingSentTimeRef.current = Date.now();
     } catch {
       // Silent fail so tracking never disrupts UI
     } finally {
@@ -299,13 +320,19 @@ export const LiveShiftTracker: React.FC = () => {
       const currentLon = parseFloat(data.longitude);
       if (isNaN(currentLat) || isNaN(currentLon) || currentLat === 0 || currentLon === 0) return;
 
-      // Filter out low accuracy GPS readings (> 45 meters) to avoid false distance jumps
-      if (data.accuracy && data.accuracy > 45) {
+      // 1. Filter out low accuracy GPS readings (> 30 meters) to avoid false distance jumps
+      if (data.accuracy && data.accuracy > 30) {
         return;
       }
 
-      // Check distance from Assigned Company / Unit location
-      if (unitCoords) {
+      // 2. Enforce 30-second minimum cooldown so out-of-location API is not spammed
+      const nowMs = Date.now();
+      if (lastPingSentTimeRef.current > 0 && nowMs - lastPingSentTimeRef.current < 30_000) {
+        return;
+      }
+
+      // 3. Check distance from Assigned Company / Unit location with hysteresis (On-Site mode only)
+      if (unitCoords && workMode === 'ONSITE') {
         const distFromUnit = getDistanceInMeters(
           currentLat,
           currentLon,
@@ -313,33 +340,37 @@ export const LiveShiftTracker: React.FC = () => {
           unitCoords.lon
         );
 
-        // CASE 1: Worker company/unit ke 20 meters ke andar hai -> NO RECORD
-        if (distFromUnit <= 20) {
+        const perimeterRadius = unitCoords.radius || 100;
+
+        // CASE 1: Worker company/unit ke geofence perimeter ke andar hai -> NO RECORD
+        if (distFromUnit <= perimeterRadius) {
           isOutsideUnitRef.current = false;
           // Reset last logged location so jab woh bahar niklega, turant naya base ban sake
           lastLoggedRef.current = null;
           return;
         }
 
-        // CASE 2: Worker pehli baar unit se 20 meter bahar nikla (> 20 meters)
-        if (!isOutsideUnitRef.current || !lastLoggedRef.current) {
-          isOutsideUnitRef.current = true;
-          const distText = `${Math.round(distFromUnit)}m from site`;
-          useNotificationStore.getState().addNotification({
-            title: 'Duty Boundary Warning',
-            message: `You have moved outside your designated post perimeter (${distText}). Please return to your post immediately.`,
-            type: 'warning',
-            category: 'GEOFENCE',
-            distanceInfo: distText,
-            targetScreen: 'UnifiedDashboard',
-          });
-          showToast({
-            type: 'warning',
-            title: 'Duty Boundary Warning',
-            message: `You are ${distText}. Please return to your duty post immediately.`,
-            duration: 4500,
-          });
-          await sendPingToBackend(currentLat, currentLon, distText);
+        // CASE 2: Worker pehli baar unit se bahar nikla (> perimeterRadius + 10m hysteresis prevents boundary jitter)
+        if (!isOutsideUnitRef.current) {
+          if (distFromUnit > (perimeterRadius + 10)) {
+            isOutsideUnitRef.current = true;
+            const distText = `${Math.round(distFromUnit)}m from site`;
+            useNotificationStore.getState().addNotification({
+              title: 'Duty Boundary Warning',
+              message: `You have moved outside your designated post perimeter (${distText}). Please return to your post immediately.`,
+              type: 'warning',
+              category: 'GEOFENCE',
+              distanceInfo: distText,
+              targetScreen: 'UnifiedDashboard',
+            });
+            showToast({
+              type: 'warning',
+              title: 'Duty Boundary Warning',
+              message: `You are ${distText}. Please return to your duty post immediately.`,
+              duration: 4500,
+            });
+            await sendPingToBackend(currentLat, currentLon, distText);
+          }
           return;
         }
       }

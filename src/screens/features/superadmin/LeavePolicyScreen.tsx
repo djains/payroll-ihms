@@ -63,6 +63,44 @@ const DEFAULT_LEAVE_TYPES: EditableLeaveType[] = [
   },
 ];
 
+const getLeaveTheme = (abbr: string, name: string) => {
+  const code = `${abbr || ''} ${name || ''}`.toUpperCase();
+  if (code.includes('CL') || code.includes('CASUAL')) {
+    return {
+      bg: '#F0FDFA',
+      border: '#99F6E4',
+      badgeBg: '#CCFBF1',
+      badgeText: '#0F766E',
+      daysColor: '#0F766E',
+    };
+  }
+  if (code.includes('SL') || code.includes('SICK') || code.includes('MED')) {
+    return {
+      bg: '#F0F9FF',
+      border: '#BAE6FD',
+      badgeBg: '#E0F2FE',
+      badgeText: '#0284C7',
+      daysColor: '#0284C7',
+    };
+  }
+  if (code.includes('PL') || code.includes('PAID') || code.includes('EL') || code.includes('EARNED')) {
+    return {
+      bg: '#FAF5FF',
+      border: '#E9D5FF',
+      badgeBg: '#F3E8FF',
+      badgeText: '#7E22CE',
+      daysColor: '#7E22CE',
+    };
+  }
+  return {
+    bg: '#F8FAFC',
+    border: '#E2E8F0',
+    badgeBg: '#F1F5F9',
+    badgeText: '#475569',
+    daysColor: '#334155',
+  };
+};
+
 export const LeavePolicyScreen: React.FC = () => {
   const { goBack } = useNavigation();
   const { currentCompany } = useTenantStore();
@@ -79,8 +117,9 @@ export const LeavePolicyScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [submittingId, setSubmittingId] = useState<number | null>(null);
 
-  // Create Policy Modal state
+  // Policy Modal state (Create & Edit)
   const [modalVisible, setModalVisible] = useState<boolean>(false);
+  const [editingPolicyId, setEditingPolicyId] = useState<number | null>(null);
   const [creating, setCreating] = useState<boolean>(false);
   const [policyName, setPolicyName] = useState<string>('');
   const [targetUnit, setTargetUnit] = useState<string>('ALL');
@@ -171,6 +210,7 @@ export const LeavePolicyScreen: React.FC = () => {
   }, [policies, selectedUnitFilter, policyUnitMap]);
 
   const handleOpenCreateModal = () => {
+    setEditingPolicyId(null);
     setPolicyName(`Workforce Policy ${new Date().getFullYear()}`);
     setTargetUnit(selectedUnitFilter);
     setStartDate(`${new Date().getFullYear()}-01-01`);
@@ -179,12 +219,45 @@ export const LeavePolicyScreen: React.FC = () => {
     setModalVisible(true);
   };
 
+  const handleOpenEditModal = (policy: BackendLeavePolicy) => {
+    setEditingPolicyId(policy.id);
+    setPolicyName(policy.policy_name || '');
+    setStartDate(policy.start_date || `${new Date().getFullYear()}-01-01`);
+    setEndDate(policy.end_date || `${new Date().getFullYear()}-12-31`);
+
+    const assigned = policyUnitMap[policy.policy_name];
+    if (assigned && assigned.length > 0) {
+      setTargetUnit(assigned[0]);
+    } else {
+      setTargetUnit(selectedUnitFilter !== 'ALL' ? selectedUnitFilter : 'ALL');
+    }
+
+    if (policy.leave_types && policy.leave_types.length > 0) {
+      setLeaveTypes(
+        policy.leave_types.map((lt) => ({
+          leave_name: lt.leave_name || 'Leave',
+          abbreviation: lt.abbreviation || (lt.leave_name ? lt.leave_name.substring(0, 3).toUpperCase() : 'LV'),
+          gender: lt.gender || 'B',
+          max_no_of_leave: String(lt.max_no_of_leave ?? '0'),
+          carry_forward:
+            lt.carry_forward === '1' ||
+            lt.carry_forward === true ||
+            String(lt.carry_forward).toLowerCase() === 'true',
+        }))
+      );
+    } else {
+      setLeaveTypes([...DEFAULT_LEAVE_TYPES]);
+    }
+
+    setModalVisible(true);
+  };
+
   const handleAddCustomLeaveType = () => {
     setLeaveTypes((prev) => [
       ...prev,
       {
         leave_name: 'Custom Leave',
-        abbreviation: 'ML',
+        abbreviation: 'CLV',
         gender: 'B',
         max_no_of_leave: '5',
         carry_forward: false,
@@ -234,45 +307,80 @@ export const LeavePolicyScreen: React.FC = () => {
         holidays: [],
       };
 
-      const res = await superadminApi.createLeavePolicy(payload);
-      if (res.success && res.data) {
-        const newPolicyId = res.data.id;
-        const pName = res.data.policy_name;
+      let savedPolicyId = editingPolicyId;
+      let pName = policyName.trim();
 
-        // If target unit selected, assign policy to that unit
-        if (targetUnit !== 'ALL') {
-          await superadminApi.assignPolicyToUnits({
-            policy_name: pName,
-            unit_codes: [targetUnit],
+      if (editingPolicyId) {
+        // UPDATE EXISTING POLICY (PUT /api/leave/policies/{id}/)
+        const res = await superadminApi.updateLeavePolicy(editingPolicyId, payload);
+        if (res.success && res.data) {
+          if (res.data.id) savedPolicyId = res.data.id;
+          if (res.data.policy_name) pName = res.data.policy_name;
+        } else {
+          const rawErr = (res as any).error;
+          const msg =
+            rawErr?.data?.policy_name?.[0] ||
+            rawErr?.data?.non_field_errors?.[0] ||
+            rawErr?.data?.detail ||
+            rawErr?.message ||
+            'Failed to update leave policy.';
+          showToast({ message: String(msg), type: 'error' });
+          setCreating(false);
+          return;
+        }
+      } else {
+        // CREATE NEW POLICY (POST /api/leave/policies/)
+        const res = await superadminApi.createLeavePolicy(payload);
+        if (res.success && res.data) {
+          if (res.data.id) savedPolicyId = res.data.id;
+          if (res.data.policy_name) pName = res.data.policy_name;
+        } else {
+          const rawErr = (res as any).error;
+          const msg =
+            rawErr?.data?.policy_name?.[0] ||
+            rawErr?.data?.non_field_errors?.[0] ||
+            rawErr?.data?.detail ||
+            rawErr?.message ||
+            'Failed to create leave policy.';
+          showToast({ message: String(msg), type: 'error' });
+          setCreating(false);
+          return;
+        }
+      }
+
+      // If target unit selected, assign policy to that unit
+      if (targetUnit !== 'ALL') {
+        await superadminApi.assignPolicyToUnits({
+          policy_name: pName,
+          unit_codes: [targetUnit],
+        });
+      }
+
+      if (activateImmediately && savedPolicyId) {
+        const submitRes = await superadminApi.submitLeavePolicy(savedPolicyId);
+        if (submitRes.success && submitRes.data) {
+          showToast({
+            message: `Quotas Synced! Updated for ${submitRes.data.employees_considered || 0} staff.`,
+            type: 'success',
+          });
+        } else {
+          showToast({
+            message: editingPolicyId ? 'Policy updated, sync pending.' : 'Policy created, sync pending.',
+            type: 'info',
           });
         }
-
-        if (activateImmediately && newPolicyId) {
-          const submitRes = await superadminApi.submitLeavePolicy(newPolicyId);
-          if (submitRes.success && submitRes.data) {
-            showToast({
-              message: `Policy Activated! Quotas provisioned for ${submitRes.data.employees_considered || 0} staff.`,
-              type: 'success',
-            });
-          }
-        } else {
-          showToast({ message: 'Leave policy created successfully.', type: 'success' });
-        }
-
-        setModalVisible(false);
-        loadData();
       } else {
-        const rawErr = (res as any).error;
-        const msg =
-          rawErr?.data?.policy_name?.[0] ||
-          rawErr?.data?.non_field_errors?.[0] ||
-          rawErr?.data?.detail ||
-          rawErr?.message ||
-          'Failed to create leave policy.';
-        showToast({ message: String(msg), type: 'error' });
+        showToast({
+          message: editingPolicyId ? 'Policy updated successfully.' : 'Leave policy created successfully.',
+          type: 'success',
+        });
       }
+
+      setModalVisible(false);
+      setEditingPolicyId(null);
+      loadData();
     } catch (e: any) {
-      showToast({ message: e?.message || 'Error creating policy', type: 'error' });
+      showToast({ message: e?.message || 'Error saving policy', type: 'error' });
     } finally {
       setCreating(false);
     }
@@ -367,103 +475,196 @@ export const LeavePolicyScreen: React.FC = () => {
     const lTypes = item.leave_types || [];
     const isSubmittingThis = submittingId === item.id;
     const assignedUnits = policyUnitMap[item.policy_name] || [];
+    const totalDays = lTypes.reduce((sum, lt) => sum + (Number(lt.max_no_of_leave) || 0), 0);
 
     return (
       <View style={styles.policyCard}>
-        {/* Header: Title + Status Pill */}
+        {/* Top Header: Icon + Full-Width Policy Title & Validity */}
         <View style={styles.policyHeader}>
+          <View style={styles.cardIconBox}>
+            <AppIcon name="calendar" size={18} color="#0284C7" />
+          </View>
+
           <View style={styles.policyTitleWrap}>
-            <Text style={styles.policyName} numberOfLines={1}>{item.policy_name}</Text>
-            <Text style={styles.policyDates} numberOfLines={1}>
-              Validity: {item.start_date || 'Ongoing'} — {item.end_date || 'Annual'}
+            <Text style={styles.policyName} numberOfLines={2}>
+              {item.policy_name}
+            </Text>
+            <View style={styles.policyDatesRow}>
+              <AppIcon name="clock" size={10} color="#64748B" />
+              <Text style={styles.policyDates} numberOfLines={1}>
+                Validity: {item.start_date || 'Annual'} — {item.end_date || 'Year End'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Scope Bar: Unit Assignment & Total Quota Badge */}
+        <View style={styles.cardScopeBar}>
+          <View style={styles.scopeLeft}>
+            <AppIcon name="location" size={11} color="#0F766E" />
+            <Text style={styles.unitScopeText} numberOfLines={1}>
+              {assignedUnits.length > 0
+                ? `Unit: ${assignedUnits.join(', ')}`
+                : 'All Units (Company Wide)'}
             </Text>
           </View>
-          <View
-            style={[
-              styles.statusBadge,
-              isSubmitted ? styles.statusActive : styles.statusDraft,
-            ]}
-          >
-            <Text
-              style={[
-                styles.statusText,
-                isSubmitted ? styles.statusTextActive : styles.statusTextDraft,
-              ]}
-              numberOfLines={1}
-            >
-              {isSubmitted ? 'Active' : 'Draft'}
+
+          <View style={styles.totalDaysBadge}>
+            <AppIcon name="calendar" size={10} color="#0F766E" />
+            <Text style={styles.totalDaysText} numberOfLines={1}>
+              {totalDays} Days / Yr
             </Text>
           </View>
         </View>
 
-        {/* Dynamic Unit Scope Pill */}
-        <View style={styles.unitScopeRow}>
-          <AppIcon name="location" size={11} color="#0F766E" />
-          <Text style={styles.unitScopeText} numberOfLines={1}>
-            {assignedUnits.length > 0
-              ? `Unit: ${assignedUnits.join(', ')}`
-              : 'All Units (Company Wide)'}
+        {/* Quota Section Header */}
+        <View style={styles.quotaSectionTitleRow}>
+          <Text style={styles.quotaSectionTitle}>Day Quotas & Rules</Text>
+          <Text style={styles.quotaCountText}>
+            {lTypes.length} {lTypes.length === 1 ? 'type' : 'types'} configured
           </Text>
         </View>
 
-        {/* Configured Day Quotas (Equal 3-Column Grid) */}
-        <Text style={styles.quotaSectionTitle}>Day Quotas</Text>
-        <View style={styles.leaveTypesGrid}>
+        {/* Full-Width Leave Quotas List */}
+        <View style={styles.leaveTypesList}>
           {lTypes.length > 0 ? (
-            lTypes.map((lt, idx) => (
-              <View key={idx} style={styles.leaveTypePill}>
-                <Text style={styles.leaveTypeAbbr} numberOfLines={1}>
-                  {lt.abbreviation || lt.leave_name}
-                </Text>
-                <Text style={styles.leaveTypeDays} numberOfLines={1}>
-                  {lt.max_no_of_leave} Days
-                </Text>
-                <Text style={styles.leaveTypeMeta} numberOfLines={1}>
-                  {lt.carry_forward ? 'Carry Fwd' : 'No CF'}
-                </Text>
-              </View>
-            ))
+            lTypes.map((lt, idx) => {
+              const theme = getLeaveTheme(lt.abbreviation, lt.leave_name);
+              const isCf =
+                lt.carry_forward === '1' ||
+                lt.carry_forward === true ||
+                String(lt.carry_forward).toLowerCase() === 'true';
+
+              return (
+                <View
+                  key={idx}
+                  style={[
+                    styles.leaveTypeCardFull,
+                    { backgroundColor: theme.bg, borderColor: theme.border },
+                  ]}
+                >
+                  <View style={styles.leaveCardLeft}>
+                    <View
+                      style={[
+                        styles.leaveCardAbbrPill,
+                        { backgroundColor: theme.badgeBg },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.leaveCardAbbrText,
+                          { color: theme.badgeText },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {lt.abbreviation || 'LV'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.leaveCardInfo}>
+                      <Text style={styles.leaveCardName} numberOfLines={1}>
+                        {lt.leave_name}
+                      </Text>
+                      <Text style={styles.leaveCardSub} numberOfLines={1}>
+                        Annual Allowance • {lt.gender === 'F' ? 'Female Only' : lt.gender === 'M' ? 'Male Only' : 'All Staff'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.leaveCardRight}>
+                    <View style={styles.leaveCardMid}>
+                      <Text
+                        style={[styles.leaveDaysNum, { color: theme.daysColor }]}
+                        numberOfLines={1}
+                      >
+                        {lt.max_no_of_leave}
+                      </Text>
+                      <Text style={styles.leaveDaysUnit}>Days</Text>
+                    </View>
+
+                    <View
+                      style={[
+                        styles.cfChip,
+                        isCf ? styles.cfChipActive : styles.cfChipInactive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.cfChipText,
+                          isCf ? styles.cfChipTextActive : styles.cfChipTextInactive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {isCf ? '✓ Carry Fwd' : '✗ No CF'}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              );
+            })
           ) : (
             <Text style={styles.leaveTypeMeta}>No quotas configured.</Text>
           )}
         </View>
 
-        {/* Action Buttons: Delete + Assign Unit + Activate */}
-        <View style={styles.cardActionRow}>
-          <TouchableOpacity
-            style={styles.deleteBtn}
-            onPress={() => handleDeletePolicy(item)}
-            activeOpacity={0.7}
-          >
-            <AppIcon name="trash" size={14} color="#EF4444" />
-          </TouchableOpacity>
+        {/* Action Buttons: Spacious 2-Row Full-Width Grid */}
+        <View style={styles.cardActionGrid}>
+          {/* Row 1: Edit Policy + Assign Unit */}
+          <View style={styles.cardActionRow}>
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => handleOpenEditModal(item)}
+              activeOpacity={0.8}
+            >
+              <AppIcon name="edit" size={15} color="#4338CA" />
+              <Text style={styles.editBtnText} numberOfLines={1}>
+                Edit Policy
+              </Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.unitAssignBtn}
-            onPress={() => handleOpenAssignModal(item)}
-            activeOpacity={0.8}
-          >
-            <AppIcon name="building" size={12} color="#0369A1" />
-            <Text style={styles.unitAssignBtnText} numberOfLines={1}>Assign Unit</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.unitAssignBtn}
+              onPress={() => handleOpenAssignModal(item)}
+              activeOpacity={0.8}
+            >
+              <AppIcon name="building" size={15} color="#0369A1" />
+              <Text style={styles.unitAssignBtnText} numberOfLines={1}>
+                Assign Unit
+              </Text>
+            </TouchableOpacity>
+          </View>
 
-          <TouchableOpacity
-            style={styles.activateBtn}
-            onPress={() => handleActivatePolicy(item)}
-            disabled={isSubmittingThis}
-            activeOpacity={0.8}
-          >
-            {isSubmittingThis ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
-            ) : (
-              <>
-                <AppIcon name="refresh-cw" size={12} color="#FFFFFF" />
-                <Text style={styles.activateBtnText} numberOfLines={1}>
-                  {isSubmitted ? 'Sync Quotas' : 'Activate'}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {/* Row 2: Delete + Sync / Activate */}
+          <View style={styles.cardActionRow}>
+            <TouchableOpacity
+              style={styles.deleteBtn}
+              onPress={() => handleDeletePolicy(item)}
+              activeOpacity={0.7}
+            >
+              <AppIcon name="trash" size={15} color="#DC2626" />
+              <Text style={styles.deleteBtnText} numberOfLines={1}>
+                Delete
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.activateBtn}
+              onPress={() => handleActivatePolicy(item)}
+              disabled={isSubmittingThis}
+              activeOpacity={0.8}
+            >
+              {isSubmittingThis ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <AppIcon name="refresh-cw" size={15} color="#FFFFFF" />
+                  <Text style={styles.activateBtnText} numberOfLines={1}>
+                    {isSubmitted ? 'Sync Quotas' : 'Activate Policy'}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     );
@@ -608,13 +809,16 @@ export const LeavePolicyScreen: React.FC = () => {
         />
       )}
 
-      {/* CREATE LEAVE POLICY MODAL */}
+      {/* CREATE / EDIT LEAVE POLICY MODAL */}
       <Modal
         visible={modalVisible}
         transparent
         animationType="slide"
         statusBarTranslucent
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={() => {
+          setModalVisible(false);
+          setEditingPolicyId(null);
+        }}
       >
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -623,14 +827,21 @@ export const LeavePolicyScreen: React.FC = () => {
           <View style={[styles.modalContent, { paddingBottom: bottomInset + 10 }]}>
             <View style={styles.modalHeader}>
               <View style={styles.modalHeaderLeft}>
-                <Text style={styles.modalTitle} numberOfLines={1}>New Leave Policy</Text>
+                <Text style={styles.modalTitle} numberOfLines={1}>
+                  {editingPolicyId ? 'Edit Leave Policy' : 'New Leave Policy'}
+                </Text>
                 <Text style={styles.modalSubtitle} numberOfLines={1}>
-                  Set day quotas & provision to unit workforce
+                  {editingPolicyId
+                    ? 'Update day quotas, dates & unit assignments'
+                    : 'Set day quotas & provision to unit workforce'}
                 </Text>
               </View>
               <TouchableOpacity
                 style={styles.modalCloseBtn}
-                onPress={() => setModalVisible(false)}
+                onPress={() => {
+                  setModalVisible(false);
+                  setEditingPolicyId(null);
+                }}
               >
                 <AppIcon name="x" size={15} color="#64748B" />
               </TouchableOpacity>
@@ -731,9 +942,13 @@ export const LeavePolicyScreen: React.FC = () => {
                 {leaveTypes.map((lt, idx) => (
                   <View key={idx} style={styles.leaveTypeRow}>
                     <View style={styles.leaveTypeRowHeader}>
-                      <Text style={styles.leaveTypeRowTitle}>
-                        {lt.leave_name} ({lt.abbreviation})
-                      </Text>
+                      <TextInput
+                        style={styles.typeNameInput}
+                        value={lt.leave_name}
+                        placeholder="Leave Name (e.g. Casual Leave)"
+                        placeholderTextColor="#94A3B8"
+                        onChangeText={(v) => handleUpdateLeaveType(idx, 'leave_name', v)}
+                      />
                       {leaveTypes.length > 1 && (
                         <TouchableOpacity
                           style={styles.removeTypeBtn}
@@ -798,7 +1013,9 @@ export const LeavePolicyScreen: React.FC = () => {
                   disabled={creating}
                   activeOpacity={0.8}
                 >
-                  <Text style={styles.draftBtnText} numberOfLines={1}>Save as Draft</Text>
+                  <Text style={styles.draftBtnText} numberOfLines={1} adjustsFontSizeToFit>
+                    {editingPolicyId ? 'Save Changes' : 'Save as Draft'}
+                  </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -810,8 +1027,8 @@ export const LeavePolicyScreen: React.FC = () => {
                   {creating ? (
                     <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Text style={styles.saveBtnText} numberOfLines={1}>
-                      Save & Activate 🚀
+                    <Text style={styles.saveBtnText} numberOfLines={1} adjustsFontSizeToFit>
+                      {editingPolicyId ? 'Save & Sync Quotas 🚀' : 'Save & Activate 🚀'}
                     </Text>
                   )}
                 </TouchableOpacity>
