@@ -15,27 +15,25 @@ workflows:
         script: |
           cd ios
           pod install
-      - name: Build iOS App (.app / unsigned IPA)
+      - name: Build iOS Simulator App for Appetize
         script: |
           cd ios
           xcodebuild build \
             -workspace IH.xcworkspace \
             -scheme IH \
             -configuration Release \
-            -destination 'generic/platform=iOS' \
+            -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             BUILD_DIR=../build/ios
           
-          cd ..
-          mkdir -p build/ios/Payload
-          cp -R build/ios/Release-iphoneos/IH.app build/ios/Payload/
-          cd build/ios
-          zip -r NG_Global_unsigned.ipa Payload
+          cd ../build/ios/Release-iphonesimulator
+          # Directly zip the .app folder so Appetize finds Info.plist right at the root
+          zip -r -X NG_Global_Simulator.zip IH.app
     artifacts:
-      - build/ios/*.ipa
-      - build/ios/Release-iphoneos/*.app
+      - build/ios/Release-iphonesimulator/*.zip
+      - build/ios/Release-iphonesimulator/*.app
     publishing:
       email:
         recipients:
