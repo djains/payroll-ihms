@@ -15,14 +15,27 @@ workflows:
         script: |
           cd ios
           pod install
-      - name: Build iOS IPA
+      - name: Build iOS App (.app / unsigned IPA)
         script: |
-          xcode-project build-ipa \
-            --workspace "ios/IH.xcworkspace" \
-            --scheme "IH"
+          cd ios
+          xcodebuild build \
+            -workspace IH.xcworkspace \
+            -scheme IH \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            BUILD_DIR=../build/ios
+          
+          cd ..
+          mkdir -p build/ios/Payload
+          cp -R build/ios/Release-iphoneos/IH.app build/ios/Payload/
+          cd build/ios
+          zip -r NG_Global_unsigned.ipa Payload
     artifacts:
-      - build/ios/ipa/*.ipa
-      - /Users/builder/Library/Developer/Xcode/DerivedData/**/Build/Products/*/*.app
+      - build/ios/*.ipa
+      - build/ios/Release-iphoneos/*.app
     publishing:
       email:
         recipients:
