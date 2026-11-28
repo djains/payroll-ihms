@@ -10,6 +10,8 @@ import {
   Image,
   Linking,
   useWindowDimensions,
+  Modal,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { styles } from './UnifiedDashboardScreen.styles';
@@ -24,6 +26,12 @@ import { useTenantStore } from '../../store/tenantStore';
 import { useSuperAdminStore } from '../../store/superAdminStore';
 import { useNotificationStore } from '../../store/notificationStore';
 import { useShiftTrackingStore } from '../../store/shiftTrackingStore';
+import { showToast } from '../../store/toastStore';
+import { getTodayEmergencyPin, getTodayDateKey } from '../../utils/faceAndDeviceSecurity';
+import {
+  getAppRatingState,
+  markAppAsRated,
+} from '../../utils/appRatingTracker';
 import { useNavigation, useNavigationState } from '../../navigation/navigationContext';
 import { ScreenName } from '../../navigation/types';
 import { staffApi, authApi, apiClient, API_ENDPOINTS, ANDROID_API_KEY, BreakPunchItem } from '../../api';
@@ -171,6 +179,13 @@ export const UnifiedDashboardScreen: React.FC = () => {
   const [deployedGuardsCount, setDeployedGuardsCount] = useState<number>(
     initialCache?.deployedGuardsCount ?? 0
   );
+  // Admin SOS Emergency Override PIN modal state
+  const [adminSosModalVisible, setAdminSosModalVisible] = useState<boolean>(false);
+  const [generatedSosPin, setGeneratedSosPin] = useState<string>('');
+
+  // 5th Login Rate App Prompt state
+  const [rateModalVisible, setRateModalVisible] = useState<boolean>(false);
+  const [selectedStars, setSelectedStars] = useState<number>(5);
   // Company Admin Live Counts
   const [adminUnitsCount, setAdminUnitsCount] = useState<number>(
     initialCache?.adminUnitsCount ?? 0
@@ -1223,6 +1238,16 @@ export const UnifiedDashboardScreen: React.FC = () => {
     }
     fetchDashboardData(false);
     checkForInAppUpdate();
+
+    // Check if 5th punch-in prompt was flagged to display
+    getAppRatingState().then((state) => {
+      if (!state.hasRated && !state.neverAskAgain && state.punchInCount >= 5 && state.lastPromptedCount === state.punchInCount) {
+        setTimeout(() => {
+          setSelectedStars(5);
+          setRateModalVisible(true);
+        }, 1200);
+      }
+    });
   }, [empCode, currentRoute.name]);
 
   const onRefresh = async () => {
@@ -2140,6 +2165,18 @@ export const UnifiedDashboardScreen: React.FC = () => {
       targetScreen: 'CompanyWorkImagesReview',
       isAvailable: () => isCompanyAdmin,
     },
+    // 28. Complaints / Tickets (Company Admin Central Management)
+    {
+      id: 'admin_complaints',
+      title: 'Complaints / Tickets',
+      getSubtitle: () => 'Manage & Resolve',
+      icon: 'ticket',
+      bgColor: '#FEE2E2',
+      iconColor: '#DC2626',
+      badgeColor: '#B91C1C',
+      targetScreen: 'AdminComplaints',
+      isAvailable: () => isCompanyAdmin,
+    },
   ];
 
   // Dynamic Filtering: Render features based on user role & backend permissions
@@ -2158,6 +2195,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
         'admin_role_rbac',
         'admin_leave_policy',
         'supervisor_leave_approvals',
+        'admin_complaints',
       ];
       return order
         .map((id) => ALL_FEATURES.find((c) => c.id === id))
@@ -2166,6 +2204,7 @@ export const UnifiedDashboardScreen: React.FC = () => {
 
     return ALL_FEATURES.filter((card) => {
       // These cards are strictly Company Admin only — never show to any other role
+      if (card.id === 'admin_complaints') return false;
       if (card.id === 'admin_attendance_review') return false;
       if (card.id === 'admin_work_images_review') return false;
       if (card.id === 'admin_leave_policy') return false;
@@ -2250,6 +2289,37 @@ export const UnifiedDashboardScreen: React.FC = () => {
           </TouchableOpacity>
 
           <View style={styles.headerRightGroup}>
+            {/* For Company Admin / SuperAdmin: SOS Dynamic PIN Generator */}
+            {isCompanyAdmin && (
+              <TouchableOpacity
+                style={styles.sosHeaderBtn}
+                onPress={() => {
+                  const compCode = currentUser?.companyId || currentCompany?.id || 'DEFAULT';
+                  const pin = getTodayEmergencyPin(compCode);
+                  setGeneratedSosPin(pin);
+                  setAdminSosModalVisible(true);
+                }}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Generate SOS Override PIN"
+              >
+                <Text style={styles.sosHeaderBtnText}>SOS</Text>
+              </TouchableOpacity>
+            )}
+
+            {/* For Employee / Staff: Quick Help & Support / Raise Query Icon Button */}
+            {!isCompanyAdmin && (
+              <TouchableOpacity
+                style={styles.queryHeaderBtn}
+                onPress={() => navigate('EmployeeComplaints')}
+                activeOpacity={0.7}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Help & Support"
+              >
+                <AppIcon name="headset" size={19} color="#0F766E" />
+              </TouchableOpacity>
+            )}
+
             {/* Global Notification Bell Icon (Left of Logout) */}
             <TouchableOpacity
               style={styles.bellButton}
@@ -2928,6 +2998,190 @@ export const UnifiedDashboardScreen: React.FC = () => {
         ]}
         onClose={() => setLogoutModalVisible(false)}
       />
+
+      {/* Admin SOS Emergency Override PIN Generator Modal */}
+      <Modal
+        visible={adminSosModalVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setAdminSosModalVisible(false)}
+      >
+        <View style={styles.sosModalBackdrop}>
+          <View style={styles.sosModalCard}>
+            <View style={styles.sosModalHeaderRow}>
+              <View style={styles.sosModalIconBadge}>
+                <AppIcon name="shield-alert" size={22} color="#DC2626" />
+              </View>
+              <TouchableOpacity
+                onPress={() => setAdminSosModalVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <AppIcon name="close" size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sosModalTitle}>Admin SOS Override PIN</Text>
+            <Text style={styles.sosModalSubtitle}>
+              Share this daily rolling PIN only with verified employees experiencing camera or device lock issues. It bypasses both Device Lock and Face Verification for today.
+            </Text>
+
+            <View style={styles.sosPinBox}>
+              <Text style={styles.sosPinLabel}>TODAY&apos;S AUTHORIZATION PIN</Text>
+              <Text style={styles.sosPinDigits}>
+                {generatedSosPin ? `${generatedSosPin.slice(0, 3)} ${generatedSosPin.slice(3)}` : '------'}
+              </Text>
+              <Text style={styles.sosPinMeta}>
+                Valid Date: {getTodayDateKey()} • Auto-refreshes at midnight
+              </Text>
+            </View>
+
+            <View style={styles.sosModalActions}>
+              <TouchableOpacity
+                style={styles.sosModalSecondaryBtn}
+                activeOpacity={0.75}
+                onPress={() => {
+                  const compCode = currentUser?.companyId || currentCompany?.id || 'DEFAULT';
+                  const freshPin = getTodayEmergencyPin(compCode);
+                  setGeneratedSosPin(freshPin);
+                  showToast({
+                    type: 'info',
+                    title: 'SOS PIN Refreshed',
+                    message: `Today's active PIN: ${freshPin}`,
+                  });
+                }}
+              >
+                <Text style={styles.sosModalSecondaryText}>Refresh</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.sosModalPrimaryBtn}
+                activeOpacity={0.8}
+                onPress={async () => {
+                  try {
+                    await Share.share({
+                      message: `IHMS Attendance SOS Override PIN (${getTodayDateKey()}): ${generatedSosPin}`,
+                    });
+                  } catch {
+                    showToast({
+                      type: 'success',
+                      title: 'SOS PIN Ready',
+                      message: `PIN: ${generatedSosPin}`,
+                    });
+                  }
+                }}
+              >
+                <Text style={styles.sosModalPrimaryText}>Share PIN</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 5th Login Rate Experience with NG GLOBAL Modal */}
+      <Modal
+        visible={rateModalVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setRateModalVisible(false)}
+      >
+        <View style={styles.ratingModalBackdrop}>
+          <View style={styles.ratingModalCard}>
+            <View style={styles.ratingBadge}>
+              <AppIcon name="star" size={26} color="#D97706" />
+            </View>
+
+            <Text style={styles.ratingTitle}>Rate your experience</Text>
+            <Text style={styles.ratingBrandSubtitle}>with NG GLOBAL</Text>
+
+            <Text style={styles.ratingDescription}>
+              Your feedback helps us continuously improve your mobile portal &amp; attendance experience.
+            </Text>
+
+            {/* Interactive 5 Star Selector */}
+            <View style={styles.starsContainer}>
+              {[1, 2, 3, 4, 5].map((starVal) => {
+                const isFilled = starVal <= selectedStars;
+                return (
+                  <TouchableOpacity
+                    key={`star-${starVal}`}
+                    style={styles.starTouchable}
+                    activeOpacity={0.7}
+                    onPress={() => setSelectedStars(starVal)}
+                    hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                  >
+                    <AppIcon
+                      name="star"
+                      size={28}
+                      color={isFilled ? '#F59E0B' : '#CBD5E1'}
+                    />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={styles.ratingActionHint}>
+              {selectedStars >= 4
+                ? '⭐ Tap below to share your review on Google Play Store'
+                : '💬 Tell us what we can improve on the Support Page'}
+            </Text>
+
+            <TouchableOpacity
+              style={styles.ratingSubmitBtn}
+              activeOpacity={0.8}
+              onPress={async () => {
+                setRateModalVisible(false);
+                await markAppAsRated();
+
+                if (selectedStars >= 4) {
+                  // High Rating: Direct to Google Play Store
+                  const playStoreUrl = 'market://details?id=com.ngglobal';
+                  const webPlayStoreUrl = 'https://play.google.com/store/apps/details?id=com.ngglobal';
+                  try {
+                    const supported = await Linking.canOpenURL(playStoreUrl);
+                    if (supported) {
+                      await Linking.openURL(playStoreUrl);
+                    } else {
+                      await Linking.openURL(webPlayStoreUrl);
+                    }
+                  } catch {
+                    await Linking.openURL(webPlayStoreUrl).catch(() => {});
+                  }
+                  showToast({
+                    type: 'success',
+                    title: 'Thank You!',
+                    message: 'Thank you for supporting NG GLOBAL on Play Store!',
+                  });
+                } else {
+                  // Low Rating: Redirect to Complaint / Query Screen
+                  navigate('EmployeeComplaints');
+                  showToast({
+                    type: 'info',
+                    title: 'Help Us Improve',
+                    message: 'Please share your feedback so we can resolve your issue.',
+                    duration: 4000,
+                  });
+                }
+              }}
+            >
+              <Text style={styles.ratingSubmitBtnText}>
+                {selectedStars >= 4 ? 'Rate on Play Store' : 'Send Feedback / Query'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.ratingDismissBtn}
+              activeOpacity={0.7}
+              onPress={() => {
+                setRateModalVisible(false);
+              }}
+            >
+              <Text style={styles.ratingDismissBtnText}>Maybe Later</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Dynamic Generic Modal Alert */}
       <CustomAlertModal

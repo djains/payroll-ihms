@@ -28,6 +28,7 @@ export type ScreenName =
   | 'DocumentVerify'
   | 'CompanyAttendanceReview'
   | 'CompanyWorkImagesReview'
+  | 'AdminComplaints'
 
   // Main Tabs
   | 'UnifiedDashboard'
@@ -50,6 +51,7 @@ export type ScreenName =
   | 'JoiningDossier'
   | 'DocumentStatus'
   | 'LeaveApply'
+  | 'EmployeeComplaints'
   | 'PettyCash'
   | 'SalarySlip'
 

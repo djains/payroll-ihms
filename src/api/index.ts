@@ -10,4 +10,5 @@ export * from './supervisor.api';
 export * from './manager.api';
 export * from './company.api';
 export * from './superadmin.api';
+export * from './complaint.api';
 

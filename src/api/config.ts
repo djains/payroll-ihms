@@ -96,5 +96,15 @@ export const API_ENDPOINTS = {
 
   // VIN Agent / Client Requests
   CLIENT_REQUESTS: '/api/transactions/client-requests/',
+
+  // Complaints / Support Tickets / Queries
+  COMPLAINT_CATEGORIES: '/api/masters/portal/unit/complaint-categories/',
+  COMPLAINT_CATEGORIES_BY_PRIORITY: '/api/masters/portal/unit/complaint-categories-by-priority/',
+  COMPLAINT_TYPES: '/api/masters/portal/unit/complaint-types/',
+  COMPLAINT_SEND: '/api/masters/portal/unit/complaint-send/',
+  COMPLAINT_GRID: '/api/masters/portal/unit/complaint-grid/',
+  HO_COMPLAINT_GRID: '/api/masters/portal/ho/ho-complaint-grid/',
+  COMPLAINT_RESOLVE: '/api/masters/service-portal/comp-resolve/',
+  COMPLAINT_COMPLETE: '/api/masters/portal/unit/complaint-complete/',
 } as const;
 

@@ -8,6 +8,7 @@ import {
   Image,
   ActivityIndicator,
   Modal,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { launchCamera } from 'react-native-image-picker';
@@ -25,6 +26,16 @@ import { apiClient } from '../../../api/client';
 import { ANDROID_API_KEY } from '../../../api/config';
 import { colors } from '../../../theme/colors';
 import { ms } from '../../../theme/responsive';
+import {
+  checkDeviceLock,
+  bindCurrentDevice,
+  verifyOrRegisterFace,
+  verifyEmergencyPin,
+  resetDeviceAndFaceLock,
+  DeviceVerificationStatus,
+  FaceVerificationStatus,
+} from '../../../utils/faceAndDeviceSecurity';
+import { trackPunchInAndCheckPrompt } from '../../../utils/appRatingTracker';
 
 // Fallback radius if not specified by unit master
 const DEFAULT_GEOFENCE_RADIUS = 100; // metres
@@ -444,6 +455,35 @@ export const GeofencePunchScreen: React.FC = () => {
   const [capturedImageType, setCapturedImageType] = useState<string>('image/jpeg');
   const [cameraLoading, setCameraLoading] = useState<boolean>(false);
 
+  // Single-device lock, face verification & Admin SOS override state
+  const [deviceStatus, setDeviceStatus] = useState<DeviceVerificationStatus>('CHECKING');
+  const [faceStatus, setFaceStatus] = useState<FaceVerificationStatus>('PENDING');
+  const [faceMatchScore, setFaceMatchScore] = useState<number>(0);
+  const [isEmergencyBypassActive, setIsEmergencyBypassActive] = useState<boolean>(false);
+  const [sosModalVisible, setSosModalVisible] = useState<boolean>(false);
+  const [sosPinInput, setSosPinInput] = useState<string>('');
+
+  useEffect(() => {
+    const empCode = currentUser?.empCode || currentUser?.username || '';
+    if (!empCode) return;
+    let active = true;
+    checkDeviceLock(empCode).then((res) => {
+      if (!active) return;
+      setDeviceStatus(res.status);
+      if (res.status === 'MISMATCH') {
+        showToast({
+          type: 'error',
+          title: 'Device Lock Warning',
+          message: 'Account is bound to another phone. Use SOS PIN to bypass or reset.',
+          duration: 4000,
+        });
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [currentUser?.empCode, currentUser?.username]);
+
   // Punch submission state
   const [punchLoading, setPunchLoading] = useState<boolean>(false);
 
@@ -801,7 +841,45 @@ export const GeofencePunchScreen: React.FC = () => {
         setCapturedImageBase64(asset.base64 || null);
         setCapturedImageName(asset.fileName || `punch_${Date.now()}.jpg`);
         setCapturedImageType(asset.type || 'image/jpeg');
-        showToast({ type: 'success', title: 'Selfie Verified', message: 'Face captured successfully.' });
+
+        if (isEmergencyBypassActive) {
+          setFaceStatus('BYPASSED');
+          setFaceMatchScore(0);
+          showToast({
+            type: 'warning',
+            title: 'Selfie Captured',
+            message: 'Selfie saved (Admin SOS Bypass active)',
+            duration: 3000,
+          });
+        } else {
+          const empCode = currentUser?.empCode || currentUser?.username || '';
+          const faceRes = await verifyOrRegisterFace(empCode, asset.uri, asset.base64 || '');
+          setFaceStatus(faceRes.status);
+          setFaceMatchScore(faceRes.score);
+
+          if (faceRes.status === 'REGISTERED') {
+            showToast({
+              type: 'success',
+              title: 'Face Registered',
+              message: faceRes.message,
+              duration: 3500,
+            });
+          } else if (faceRes.status === 'MATCHED') {
+            showToast({
+              type: 'success',
+              title: 'Face Verified',
+              message: faceRes.message,
+              duration: 3000,
+            });
+          } else {
+            showToast({
+              type: 'error',
+              title: 'Face Mismatch',
+              message: faceRes.message,
+              duration: 4000,
+            });
+          }
+        }
       }
     } catch (camErr: any) {
       setCameraLoading(false);
@@ -870,23 +948,75 @@ export const GeofencePunchScreen: React.FC = () => {
       return;
     }
 
-    // 3. Selfie check
-    if (!capturedImageUri) {
-      showAlert(
-        'Selfie Required',
-        'Please take your front-camera selfie before submitting attendance.',
-        'warning',
-        [
-          {
-            text: 'Take Selfie',
-            onPress: () => {
-              setAlertConfig((prev) => ({ ...prev, visible: false }));
-              openCamera();
+    // 3. Single Device & Face Verification check (skipped when Admin SOS Bypass is active)
+    if (!isEmergencyBypassActive) {
+      if (deviceStatus === 'MISMATCH') {
+        showAlert(
+          'Unauthorized Device',
+          'This account is locked to another mobile device.\n\nTap the SOS icon in the top header and enter today\'s Admin PIN to bypass or reset.',
+          'danger',
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () => setAlertConfig((prev) => ({ ...prev, visible: false })),
             },
-          },
-        ]
-      );
-      return;
+            {
+              text: 'Enter SOS PIN',
+              onPress: () => {
+                setAlertConfig((prev) => ({ ...prev, visible: false }));
+                setSosPinInput('');
+                setSosModalVisible(true);
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      if (!capturedImageUri) {
+        showAlert(
+          'Selfie Required',
+          'Please take your front-camera selfie before submitting attendance.',
+          'warning',
+          [
+            {
+              text: 'Take Selfie',
+              onPress: () => {
+                setAlertConfig((prev) => ({ ...prev, visible: false }));
+                openCamera();
+              },
+            },
+          ]
+        );
+        return;
+      }
+
+      if (faceStatus === 'MISMATCH' || faceStatus === 'INVALID') {
+        showAlert(
+          'Face Verification Failed',
+          'Your selfie did not match your registered face template.\n\nPlease retake a clear selfie or tap the SOS icon in the top header for Admin Override.',
+          'danger',
+          [
+            {
+              text: 'Retake Selfie',
+              onPress: () => {
+                setAlertConfig((prev) => ({ ...prev, visible: false }));
+                openCamera();
+              },
+            },
+            {
+              text: 'Use SOS PIN',
+              onPress: () => {
+                setAlertConfig((prev) => ({ ...prev, visible: false }));
+                setSosPinInput('');
+                setSosModalVisible(true);
+              },
+            },
+          ]
+        );
+        return;
+      }
     }
 
     setPunchLoading(true);
@@ -944,7 +1074,25 @@ export const GeofencePunchScreen: React.FC = () => {
       console.log(`[PUNCH] 📥 Result: Success=${Boolean(res?.success)}`);
 
       if (res.success || (res.data as any)?.status === 'ok') {
+        if (!isEmergencyBypassActive && deviceStatus === 'UNBOUND') {
+          await bindCurrentDevice(empCode);
+          setDeviceStatus('VERIFIED');
+        }
+
         const msg = (res.data as any)?.message || `Shift Punch ${type} recorded successfully!`;
+        const verificationNote = isEmergencyBypassActive
+          ? 'Status: BYPASSED via Admin SOS PIN (Device & Face skipped).'
+          : `Status: VERIFIED (Face ${faceMatchScore}% & Device Lock passed).`;
+
+        showToast({
+          type: isEmergencyBypassActive ? 'warning' : 'success',
+          title: isEmergencyBypassActive ? `Punch ${type} Bypassed` : `Punch ${type} Verified`,
+          message: isEmergencyBypassActive
+            ? `Punch ${type}: Bypassed via Admin SOS`
+            : `Punch ${type}: Verified (Face ${faceMatchScore}% & Device)`,
+          duration: 3800,
+        });
+
         if (type === 'IN') {
           setShiftPunchState((prev) => ({
             ...prev,
@@ -953,6 +1101,9 @@ export const GeofencePunchScreen: React.FC = () => {
           }));
           useShiftTrackingStore.getState().setWorkMode(selectedMode);
           useShiftTrackingStore.getState().setShiftActive(true);
+
+          // Track successful Punch IN count for 5th Punch Experience Rating
+          trackPunchInAndCheckPrompt().catch(() => {});
         } else {
           setShiftPunchState((prev) => ({
             ...prev,
@@ -963,7 +1114,7 @@ export const GeofencePunchScreen: React.FC = () => {
         }
         showAlert(
           `Punch ${type} Recorded`,
-          msg,
+          `${msg}\n\n${verificationNote}`,
           'success',
           [
             {
@@ -1169,6 +1320,22 @@ export const GeofencePunchScreen: React.FC = () => {
         <AppHeader
           title="Attendance Punch"
           onBack={goBack}
+          rightComponent={
+            <TouchableOpacity
+              style={[styles.headerSosBtn, isEmergencyBypassActive && styles.headerSosBtnActive]}
+              onPress={() => {
+                setSosPinInput('');
+                setSosModalVisible(true);
+              }}
+              activeOpacity={0.75}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Emergency SOS Override"
+            >
+              <Text style={[styles.headerSosBtnText, isEmergencyBypassActive && styles.headerSosBtnTextActive]}>
+                {isEmergencyBypassActive ? 'SOS ON' : 'SOS'}
+              </Text>
+            </TouchableOpacity>
+          }
         />
       }
       contentContainerStyle={styles.container}
@@ -1511,6 +1678,14 @@ export const GeofencePunchScreen: React.FC = () => {
       </View>
 
       {/* Shift Status Indicator Banner */}
+      {isEmergencyBypassActive && (
+        <View style={styles.bypassBanner}>
+          <AppIcon name="shield-check" size={16} color="#B45309" />
+          <Text style={styles.bypassBannerText}>
+            Admin SOS Bypass Active — Device Lock &amp; Face Verification bypassed for this punch.
+          </Text>
+        </View>
+      )}
       {shiftPunchState.hasPunchedIn && (
         <View
           style={{
@@ -1554,7 +1729,12 @@ export const GeofencePunchScreen: React.FC = () => {
           style={[
             styles.punchActionCard,
             styles.punchInCard,
-            (shiftPunchState.hasPunchedIn || !capturedImageUri || currentLat === null || !canSatisfyLocation) && styles.punchCardDisabled,
+            (shiftPunchState.hasPunchedIn ||
+              (!isEmergencyBypassActive &&
+                (!capturedImageUri || faceStatus === 'MISMATCH' || faceStatus === 'INVALID' || deviceStatus === 'MISMATCH')) ||
+              currentLat === null ||
+              !canSatisfyLocation) &&
+              styles.punchCardDisabled,
           ]}
           activeOpacity={shiftPunchState.hasPunchedIn ? 1 : 0.88}
           disabled={shiftPunchState.hasPunchedIn || punchLoading}
@@ -1605,7 +1785,12 @@ export const GeofencePunchScreen: React.FC = () => {
           style={[
             styles.punchActionCard,
             styles.punchOutCard,
-            (!shiftPunchState.hasPunchedIn || !capturedImageUri || currentLat === null || !canSatisfyLocation) && styles.punchCardDisabled,
+            (!shiftPunchState.hasPunchedIn ||
+              (!isEmergencyBypassActive &&
+                (!capturedImageUri || faceStatus === 'MISMATCH' || faceStatus === 'INVALID' || deviceStatus === 'MISMATCH')) ||
+              currentLat === null ||
+              !canSatisfyLocation) &&
+              styles.punchCardDisabled,
           ]}
           activeOpacity={!shiftPunchState.hasPunchedIn ? 1 : 0.88}
           disabled={!shiftPunchState.hasPunchedIn || punchLoading}
@@ -1692,12 +1877,55 @@ export const GeofencePunchScreen: React.FC = () => {
 
         <View style={styles.checkItemRow}>
           <AppIcon
-            name={capturedImageUri ? 'check' : 'close'}
+            name={
+              isEmergencyBypassActive || faceStatus === 'MATCHED' || faceStatus === 'REGISTERED'
+                ? 'check'
+                : 'close'
+            }
             size={16}
-            color={capturedImageUri ? '#059669' : '#DC2626'}
+            color={
+              isEmergencyBypassActive
+                ? '#D97706'
+                : faceStatus === 'MATCHED' || faceStatus === 'REGISTERED'
+                ? '#059669'
+                : '#DC2626'
+            }
           />
           <Text style={styles.checkItemText}>
-            {capturedImageUri ? 'Front Camera Selfie Captured' : 'Take Face Selfie via Camera'}
+            {isEmergencyBypassActive
+              ? 'Face Match: Bypassed (Admin SOS)'
+              : faceStatus === 'REGISTERED'
+              ? 'Face Match: Registered (100%)'
+              : faceStatus === 'MATCHED'
+              ? `Face Match: Verified (${faceMatchScore}%)`
+              : faceStatus === 'MISMATCH' || faceStatus === 'INVALID'
+              ? `Face Match: Failed (${faceMatchScore}%) — Retake/SOS`
+              : 'Face Match: Capture Front Selfie'}
+          </Text>
+        </View>
+
+        <View style={styles.checkItemRow}>
+          <AppIcon
+            name={isEmergencyBypassActive || deviceStatus !== 'MISMATCH' ? 'check' : 'close'}
+            size={16}
+            color={
+              isEmergencyBypassActive
+                ? '#D97706'
+                : deviceStatus === 'MISMATCH'
+                ? '#DC2626'
+                : '#059669'
+            }
+          />
+          <Text style={styles.checkItemText}>
+            {isEmergencyBypassActive
+              ? 'Device Lock: Bypassed (Admin SOS)'
+              : deviceStatus === 'VERIFIED'
+              ? 'Device Lock: Verified (This Phone)'
+              : deviceStatus === 'UNBOUND'
+              ? 'Device Lock: New Phone (Auto-Binds)'
+              : deviceStatus === 'MISMATCH'
+              ? 'Device Lock: Mismatch (Use SOS PIN)'
+              : 'Device Lock: Checking phone...'}
           </Text>
         </View>
       </View>
@@ -1756,6 +1984,113 @@ export const GeofencePunchScreen: React.FC = () => {
               <AppIcon name="refresh" size={14} color={colors.primary} />
               <Text style={styles.gpsRefreshBtnText}>Recenter</Text>
             </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Admin SOS Emergency Override & Device/Face Reset Modal */}
+      <Modal
+        visible={sosModalVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => setSosModalVisible(false)}
+      >
+        <View style={styles.sosModalOverlay}>
+          <View style={styles.sosModalCard}>
+            <View style={styles.sosModalTopRow}>
+              <View style={styles.sosModalBadge}>
+                <AppIcon name="shield-alert" size={22} color="#DC2626" />
+              </View>
+              <TouchableOpacity
+                onPress={() => setSosModalVisible(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <AppIcon name="close" size={20} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sosModalTitle}>Admin SOS Override</Text>
+            <Text style={styles.sosModalDesc}>
+              Enter today&apos;s 6-digit Admin SOS PIN to bypass Device Lock &amp; Face Verification for this punch, or permanently reset your bound device &amp; face template.
+            </Text>
+
+            <TextInput
+              style={styles.sosPinInput}
+              value={sosPinInput}
+              onChangeText={(txt) => setSosPinInput(txt.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              placeholderTextColor="#94A3B8"
+              keyboardType="number-pad"
+              maxLength={6}
+              autoFocus
+            />
+
+            <View style={styles.sosModalBtnStack}>
+              <TouchableOpacity
+                style={styles.sosPrimaryBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  const compCode = currentUser?.companyId || 'DEFAULT';
+                  if (!verifyEmergencyPin(sosPinInput, compCode)) {
+                    showToast({
+                      type: 'error',
+                      title: 'Invalid SOS PIN',
+                      message: 'PIN is incorrect or expired. Ask Company Admin for today\'s SOS PIN.',
+                      duration: 3500,
+                    });
+                    return;
+                  }
+                  setIsEmergencyBypassActive(true);
+                  setDeviceStatus('BYPASSED');
+                  setFaceStatus('BYPASSED');
+                  setSosModalVisible(false);
+                  showToast({
+                    type: 'warning',
+                    title: 'Admin SOS Bypass Active',
+                    message: 'Device Lock & Face Match bypassed for this punch.',
+                    duration: 4000,
+                  });
+                }}
+              >
+                <Text style={styles.sosPrimaryBtnText}>Bypass Device &amp; Face (This Punch)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.sosResetBtn}
+                activeOpacity={0.8}
+                onPress={async () => {
+                  const compCode = currentUser?.companyId || 'DEFAULT';
+                  if (!verifyEmergencyPin(sosPinInput, compCode)) {
+                    showToast({
+                      type: 'error',
+                      title: 'Invalid SOS PIN',
+                      message: 'Enter today\'s valid Admin SOS PIN to reset Device & Face lock.',
+                      duration: 3500,
+                    });
+                    return;
+                  }
+                  const empCode = currentUser?.empCode || currentUser?.username || '';
+                  await resetDeviceAndFaceLock(empCode);
+                  await bindCurrentDevice(empCode);
+                  setIsEmergencyBypassActive(false);
+                  setDeviceStatus('VERIFIED');
+                  setFaceStatus('PENDING');
+                  setFaceMatchScore(0);
+                  setCapturedImageUri(null);
+                  setCapturedImageBase64(null);
+                  setSosModalVisible(false);
+                  showToast({
+                    type: 'success',
+                    title: 'Device & Face Reset Complete',
+                    message: 'This phone is now bound. Please capture your new face selfie.',
+                    duration: 4000,
+                  });
+                }}
+              >
+                <Text style={styles.sosResetBtnText}>Reset Device &amp; Face Permanently</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>

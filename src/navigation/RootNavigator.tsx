@@ -31,6 +31,8 @@ import { AdminSalarySlipScreen } from '../screens/features/superadmin/AdminSalar
 import { DocumentVerifyScreen } from '../screens/features/superadmin/DocumentVerifyScreen';
 import { CompanyAttendanceReviewScreen } from '../screens/features/superadmin/CompanyAttendanceReviewScreen';
 import { CompanyWorkImagesReviewScreen } from '../screens/features/superadmin/CompanyWorkImagesReviewScreen';
+import { AdminComplaintScreen } from '../screens/features/complaints/AdminComplaintScreen';
+import { EmployeeComplaintScreen } from '../screens/features/complaints/EmployeeComplaintScreen';
 
 // Common Dashboard Screens
 import { ProfileScreen } from '../screens/common/ProfileScreen';
@@ -98,6 +100,8 @@ const SCREEN_COMPONENTS: Record<string, ScreenRenderer> = {
   DocumentVerify: DocumentVerifyScreen,
   CompanyAttendanceReview: CompanyAttendanceReviewScreen,
   CompanyWorkImagesReview: CompanyWorkImagesReviewScreen,
+  AdminComplaints: AdminComplaintScreen,
+  EmployeeComplaints: EmployeeComplaintScreen,
 
   // Common Tabs & Dashboards
   UnifiedDashboard: UnifiedDashboardScreen,

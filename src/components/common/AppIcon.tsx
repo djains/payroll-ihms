@@ -3869,6 +3869,172 @@ export const AppIcon: React.FC<AppIconProps> = ({
     );
   }
 
+  // Message / Chat / Query / Complaint Speech Bubble
+  if (name === 'message-circle' || name === 'message-square' || name === 'chat' || name === 'query' || name === 'complaint') {
+    const bubbleW = Math.round(scaledSize * 0.82);
+    const bubbleH = Math.round(scaledSize * 0.65);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View
+          style={{
+            width: bubbleW,
+            height: bubbleH,
+            borderRadius: ms(4),
+            borderWidth: stroke,
+            borderColor: color,
+            justifyContent: 'center',
+            alignItems: 'center',
+            paddingHorizontal: ms(2),
+            position: 'relative',
+          }}
+        >
+          <View style={{ width: '60%', height: stroke, backgroundColor: color, borderRadius: 0.5, marginBottom: ms(2) }} />
+          <View style={{ width: '40%', height: stroke, backgroundColor: color, borderRadius: 0.5, alignSelf: 'flex-start', marginLeft: '20%' }} />
+          {/* Bottom left tail notch */}
+          <View
+            style={{
+              position: 'absolute',
+              bottom: -ms(4),
+              left: ms(4),
+              width: 0,
+              height: 0,
+              borderTopWidth: ms(4),
+              borderTopColor: color,
+              borderRightWidth: ms(4),
+              borderRightColor: 'transparent',
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  // Customer Support Headset Icon (Professional Support / Helpdesk)
+  if (name === 'headset' || name === 'support' || name === 'customer-support' || name === 'help-desk') {
+    const headW = Math.round(scaledSize * 0.78);
+    const headH = Math.round(scaledSize * 0.76);
+    const earW = Math.max(3, Math.round(scaledSize * 0.16));
+    const earH = Math.round(scaledSize * 0.38);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View style={{ width: headW, height: headH, position: 'relative' }}>
+          {/* Headband arch */}
+          <View
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: earW / 2,
+              right: earW / 2,
+              height: headH * 0.65,
+              borderTopLeftRadius: (headW - earW) / 2,
+              borderTopRightRadius: (headW - earW) / 2,
+              borderWidth: stroke,
+              borderBottomWidth: 0,
+              borderColor: color,
+            }}
+          />
+          {/* Left Earpad */}
+          <View
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: headH * 0.32,
+              width: earW,
+              height: earH,
+              borderRadius: earW / 2,
+              backgroundColor: color,
+            }}
+          />
+          {/* Right Earpad */}
+          <View
+            style={{
+              position: 'absolute',
+              right: 0,
+              top: headH * 0.32,
+              width: earW,
+              height: earH,
+              borderRadius: earW / 2,
+              backgroundColor: color,
+            }}
+          />
+          {/* Mic Arm & Tip */}
+          <View
+            style={{
+              position: 'absolute',
+              right: earW / 2,
+              bottom: 1,
+              width: headW * 0.44,
+              height: headH * 0.36,
+              borderBottomWidth: stroke,
+              borderRightWidth: stroke,
+              borderBottomRightRadius: ms(5),
+              borderColor: color,
+            }}
+          />
+          <View
+            style={{
+              position: 'absolute',
+              right: headW * 0.36,
+              bottom: 0,
+              width: ms(4),
+              height: ms(4),
+              borderRadius: ms(2),
+              backgroundColor: color,
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  // Help Circle
+  if (name === 'help-circle' || name === 'help') {
+    const outerD = Math.round(scaledSize * 0.86);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View
+          style={{
+            width: outerD,
+            height: outerD,
+            borderRadius: outerD / 2,
+            borderWidth: stroke,
+            borderColor: color,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <Text style={{ fontSize: Math.round(scaledSize * 0.52), fontWeight: '900', color, includeFontPadding: false }}>
+            ?
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Ticket Outline
+  if (name === 'ticket' || name === 'ticket-outline') {
+    const tW = Math.round(scaledSize * 0.85);
+    const tH = Math.round(scaledSize * 0.65);
+    return (
+      <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
+        <View
+          style={{
+            width: tW,
+            height: tH,
+            borderRadius: ms(3),
+            borderWidth: stroke,
+            borderColor: color,
+            justifyContent: 'center',
+            alignItems: 'center',
+          }}
+        >
+          <View style={{ width: '50%', height: stroke, backgroundColor: color, borderRadius: 0.5, marginBottom: ms(2) }} />
+          <View style={{ width: '70%', height: stroke, backgroundColor: color, borderRadius: 0.5 }} />
+        </View>
+      </View>
+    );
+  }
+
   // Safe Default Vector Fallback (avoids missing-font '?' question mark box on Android)
   return (
     <View style={[styles.centeredBox, { width: scaledSize, height: scaledSize }, style as ViewStyle]}>
